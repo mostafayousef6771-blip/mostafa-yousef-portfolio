@@ -45,7 +45,11 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
     setUploadingImage(true);
     setUploadError(null);
     try {
-      const url = await repository.uploadFile(file, 'certificates');
+      const result: any = await repository.uploadFile(file, 'certificates');
+      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
+      if (!url || url === '[object Object]') {
+        throw new Error('Badge image upload completed, but could not extract a valid URL.');
+      }
       setFormData((prev) => ({ ...prev, image_url: url }));
     } catch (err: any) {
       setUploadError(err.message || 'Badge upload failed.');
@@ -62,7 +66,11 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
     setUploadingPdf(true);
     setUploadError(null);
     try {
-      const url = await repository.uploadFile(file, 'certificates');
+      const result: any = await repository.uploadFile(file, 'certificates');
+      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
+      if (!url || url === '[object Object]') {
+        throw new Error('Certificate document upload completed, but could not extract a valid URL.');
+      }
       setFormData((prev) => ({ ...prev, pdf_url: url }));
     } catch (err: any) {
       setUploadError(err.message || 'PDF upload failed.');

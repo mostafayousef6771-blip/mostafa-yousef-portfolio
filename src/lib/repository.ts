@@ -148,15 +148,29 @@ export const repository = {
   // PROFILE
   // --------------------------------------------------
   async getProfile(): Promise<Profile | null> {
+    let result: Profile | null = null;
     if (isSupabaseConfigured() && supabase) {
       try {
         const { data, error } = await supabase.from('profile').select('*').limit(1).maybeSingle();
-        if (!error && data) return data as Profile;
+        if (!error && data) result = data as Profile;
       } catch (err) {
         console.warn('Supabase fetch error, fallback to local', err);
       }
     }
-    return getLocalItem<Profile | null>(STORAGE_KEYS.PROFILE, null);
+    if (!result) {
+      result = getLocalItem<Profile | null>(STORAGE_KEYS.PROFILE, null);
+    }
+    if (result) {
+      let avatar: any = result.avatar_url;
+      if (avatar && typeof avatar === 'object') {
+        avatar = avatar.url || avatar.publicUrl || '';
+      }
+      if (typeof avatar === 'string' && avatar.trim() === '[object Object]') {
+        avatar = '';
+      }
+      result.avatar_url = typeof avatar === 'string' ? avatar : '';
+    }
+    return result;
   },
 
   async updateProfile(profileData: Partial<Profile>): Promise<Profile> {
@@ -171,9 +185,18 @@ export const repository = {
       hero_cta_contact_label: 'Contact Me',
     };
 
+    let sanitizedAvatar: any = profileData.avatar_url !== undefined ? profileData.avatar_url : current.avatar_url;
+    if (sanitizedAvatar && typeof sanitizedAvatar === 'object') {
+      sanitizedAvatar = sanitizedAvatar.url || sanitizedAvatar.publicUrl || '';
+    }
+    if (typeof sanitizedAvatar === 'string' && sanitizedAvatar.trim() === '[object Object]') {
+      sanitizedAvatar = '';
+    }
+
     const updated: Profile = {
       ...current,
       ...profileData,
+      avatar_url: typeof sanitizedAvatar === 'string' ? sanitizedAvatar : '',
       updated_at: new Date().toISOString(),
     };
 
@@ -1285,14 +1308,31 @@ export const repository = {
       throw new Error(`Server returned non-JSON response (HTTP ${response.status}): ${snippet || 'Empty body'}`);
     }
 
-    if (!response.ok || !data.success || !data.url) {
+    let extractedUrl = '';
+    if (typeof data.url === 'string') {
+      extractedUrl = data.url;
+    } else if (typeof data.publicUrl === 'string') {
+      extractedUrl = data.publicUrl;
+    } else if (typeof data.url?.publicUrl === 'string') {
+      extractedUrl = data.url.publicUrl;
+    } else if (typeof data.url?.url === 'string') {
+      extractedUrl = data.url.url;
+    } else if (typeof data.data?.url === 'string') {
+      extractedUrl = data.data.url;
+    } else if (typeof data.data?.publicUrl === 'string') {
+      extractedUrl = data.data.publicUrl;
+    } else if (typeof data.data === 'string') {
+      extractedUrl = data.data;
+    }
+
+    if (!response.ok || !data.success || !extractedUrl || extractedUrl === '[object Object]') {
       const errorMsg = data.error || `Upload failed with HTTP status ${response.status}`;
       console.error(`[Upload Failed] ${errorMsg}`, data);
       throw new Error(errorMsg);
     }
 
-    console.log(`[Upload Success] Public URL: "${data.url}", Path: "${data.path}"`);
-    return data.url;
+    console.log(`[Upload Success] Public URL: "${extractedUrl}", Path: "${data.path}"`);
+    return extractedUrl;
   },
 
   async uploadMediaFile(file: File, bucket = 'media'): Promise<MediaItem> {
@@ -1339,18 +1379,35 @@ export const repository = {
       throw new Error(`Server returned non-JSON response (HTTP ${response.status}): ${snippet || 'Empty body'}`);
     }
 
-    if (!response.ok || !data.success || !data.url) {
+    let extractedUrl = '';
+    if (typeof data.url === 'string') {
+      extractedUrl = data.url;
+    } else if (typeof data.publicUrl === 'string') {
+      extractedUrl = data.publicUrl;
+    } else if (typeof data.url?.publicUrl === 'string') {
+      extractedUrl = data.url.publicUrl;
+    } else if (typeof data.url?.url === 'string') {
+      extractedUrl = data.url.url;
+    } else if (typeof data.data?.url === 'string') {
+      extractedUrl = data.data.url;
+    } else if (typeof data.data?.publicUrl === 'string') {
+      extractedUrl = data.data.publicUrl;
+    } else if (typeof data.data === 'string') {
+      extractedUrl = data.data;
+    }
+
+    if (!response.ok || !data.success || !extractedUrl || extractedUrl === '[object Object]') {
       const errorMsg = data.error || `Upload failed with HTTP status ${response.status}`;
       console.error(`[Media Upload Failed] ${errorMsg}`, data);
       throw new Error(errorMsg);
     }
 
-    console.log(`[Media Upload Success] Public URL: "${data.url}", Path: "${data.path}"`);
+    console.log(`[Media Upload Success] Public URL: "${extractedUrl}", Path: "${data.path}"`);
 
     const item: Omit<MediaItem, 'id' | 'created_at'> = {
       name: file.name,
       file_path: data.path || '',
-      file_url: data.url,
+      file_url: extractedUrl,
       size: file.size,
       file_type: file.type || 'application/octet-stream',
       storage_bucket: bucket,

@@ -28,7 +28,18 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
 
   useEffect(() => {
     if (profile) {
-      setFormData(profile);
+      let rawAvatar: any = profile.avatar_url;
+      if (rawAvatar && typeof rawAvatar === 'object') {
+        rawAvatar = rawAvatar.url || rawAvatar.publicUrl || '';
+      }
+      if (typeof rawAvatar === 'string' && rawAvatar.trim() === '[object Object]') {
+        rawAvatar = '';
+      }
+
+      setFormData({
+        ...profile,
+        avatar_url: typeof rawAvatar === 'string' ? rawAvatar : '',
+      });
     }
   }, [profile]);
 
@@ -39,8 +50,19 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
     setUploading(true);
     setUploadError(null);
     try {
-      const url = await repository.uploadFile(file, 'profile');
-      setFormData((prev) => ({ ...prev, avatar_url: url }));
+      const result: any = await repository.uploadFile(file, 'profile');
+      let finalUrl = '';
+      if (typeof result === 'string') {
+        finalUrl = result;
+      } else if (result && typeof result === 'object') {
+        finalUrl = result.url || result.publicUrl || result.data?.url || result.data?.publicUrl || '';
+      }
+
+      if (!finalUrl || finalUrl === '[object Object]') {
+        throw new Error('Avatar upload completed, but could not extract a valid image URL string.');
+      }
+
+      setFormData((prev) => ({ ...prev, avatar_url: finalUrl }));
     } catch (err: any) {
       setUploadError(err.message || 'Avatar upload failed. Please try again.');
     } finally {
@@ -164,7 +186,7 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
                 </p>
               )}
 
-              {formData.avatar_url && (
+              {formData.avatar_url && typeof formData.avatar_url === 'string' && formData.avatar_url !== '[object Object]' && (
                 <div className="mt-3 flex items-center gap-3 p-2 bg-slate-950/60 border border-slate-800 rounded-2xl w-fit">
                   <img
                     src={formData.avatar_url}

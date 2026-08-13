@@ -33,7 +33,11 @@ export const AdminResumePage: React.FC<AdminResumePageProps> = ({ resume = null,
     setUploading(true);
     setErrorMsg(null);
     try {
-      const url = await repository.uploadFile(file, 'resume');
+      const result: any = await repository.uploadFile(file, 'resume');
+      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
+      if (!url || url === '[object Object]') {
+        throw new Error('Resume upload completed, but could not extract a valid URL.');
+      }
       const sizeFormatted = (file.size / (1024 * 1024)).toFixed(1) + ' MB / PDF';
       setFormData((prev) => ({
         ...prev,

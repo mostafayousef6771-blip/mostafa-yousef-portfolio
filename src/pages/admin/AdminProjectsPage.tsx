@@ -48,7 +48,11 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
     setUploadingCover(true);
     setUploadError(null);
     try {
-      const url = await repository.uploadFile(file, 'projects');
+      const result: any = await repository.uploadFile(file, 'projects');
+      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
+      if (!url || url === '[object Object]') {
+        throw new Error('Cover upload completed, but could not extract a valid URL.');
+      }
       setFormData((prev) => ({ ...prev, cover_image: url }));
     } catch (err: any) {
       setUploadError(err.message || 'Cover image upload failed.');
@@ -68,8 +72,11 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
       const uploadedUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const url = await repository.uploadFile(file, 'projects');
-        uploadedUrls.push(url);
+        const result: any = await repository.uploadFile(file, 'projects');
+        const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
+        if (url && url !== '[object Object]') {
+          uploadedUrls.push(url);
+        }
       }
 
       setGalleryInput((prev) => {
