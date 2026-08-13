@@ -1338,120 +1338,57 @@ export const repository = {
     const sessionRes = await client?.auth.getSession().catch(() => null);
     const token = sessionRes?.data?.session?.access_token || '';
 
-    // 1. Try serverless /api/upload endpoint first
-    let serverUploadSuccess = false;
-    let extractedUrl = '';
-    let uploadedPath = '';
-    let serverUploadError: Error | null = null;
+    // Authoritative server-side /api/upload endpoint
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('bucket', bucket);
 
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const responseText = await response.text();
+    let data: any = {};
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('bucket', bucket);
-
-      const headers: Record<string, string> = {
-        Accept: 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-
-      const responseText = await response.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        data = {};
-      }
-
-      if (response.ok && data.success) {
-        if (typeof data.url === 'string') {
-          extractedUrl = data.url;
-        } else if (typeof data.publicUrl === 'string') {
-          extractedUrl = data.publicUrl;
-        } else if (typeof data.url?.publicUrl === 'string') {
-          extractedUrl = data.url.publicUrl;
-        } else if (typeof data.url?.url === 'string') {
-          extractedUrl = data.url.url;
-        } else if (typeof data.data?.url === 'string') {
-          extractedUrl = data.data.url;
-        } else if (typeof data.data?.publicUrl === 'string') {
-          extractedUrl = data.data.publicUrl;
-        } else if (typeof data.data === 'string') {
-          extractedUrl = data.data;
-        }
-
-        if (extractedUrl && extractedUrl !== '[object Object]' && extractedUrl.startsWith('http')) {
-          serverUploadSuccess = true;
-          uploadedPath = data.path || '';
-        }
-      } else if (!response.ok) {
-        const errorMsg = data.error || `Server upload endpoint failed with HTTP ${response.status}`;
-        console.warn('[Upload Server Endpoint Error]', errorMsg);
-        serverUploadError = new Error(errorMsg);
-      }
-    } catch (serverErr: any) {
-      console.warn('[Upload Server Endpoint Exception]', serverErr);
-      serverUploadError = serverErr;
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Server upload endpoint returned invalid response (HTTP ${response.status}): ${responseText.substring(0, 120)}`);
     }
 
-    if (serverUploadSuccess && extractedUrl) {
-      console.log(`[Upload Success via API] URL: "${extractedUrl}", Path: "${uploadedPath}"`);
-      return extractedUrl;
+    if (!response.ok || !data.success) {
+      const errorMsg = data.error || `Server upload failed with HTTP ${response.status}`;
+      console.error('[Upload Failed]', errorMsg);
+      throw new Error(errorMsg);
     }
 
-    // 2. Direct client-side Supabase Storage upload fallback
-    if (client) {
-      console.log(`[Upload Fallback] Executing direct Supabase Storage upload to bucket "${bucket}"...`);
-      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const filePath = `${Date.now()}_${sanitizedName}`;
-
-      const { data: directUploadData, error: directUploadErr } = await client.storage
-        .from(bucket)
-        .upload(filePath, file, {
-          contentType: file.type || 'application/octet-stream',
-          cacheControl: '3600',
-          upsert: true,
-        });
-
-      if (!directUploadErr && directUploadData?.path) {
-        const finalPath = directUploadData.path;
-        const publicUrlResult = client.storage.from(bucket).getPublicUrl(finalPath);
-        const rawPublicData: any = publicUrlResult?.data ?? publicUrlResult;
-
-        let directUrl = '';
-        if (typeof rawPublicData === 'string' && rawPublicData.startsWith('http')) {
-          directUrl = rawPublicData;
-        } else if (typeof rawPublicData?.publicUrl === 'string' && rawPublicData.publicUrl.startsWith('http')) {
-          directUrl = rawPublicData.publicUrl;
-        } else if (typeof rawPublicData?.publicURL === 'string' && rawPublicData.publicURL.startsWith('http')) {
-          directUrl = rawPublicData.publicURL;
-        }
-
-        if (!directUrl || directUrl === '[object Object]' || !directUrl.startsWith('http')) {
-          const cleanBase = (supabaseUrl || '').replace(/\/+$/, '');
-          if (cleanBase) {
-            directUrl = `${cleanBase}/storage/v1/object/public/${bucket}/${finalPath}`;
-          }
-        }
-
-        if (directUrl && directUrl.startsWith('http')) {
-          console.log(`[Upload Success via Direct Supabase] URL: "${directUrl}", Path: "${finalPath}"`);
-          return directUrl;
-        }
-      } else if (directUploadErr) {
-        console.error('[Direct Supabase Storage Error]', directUploadErr);
-        throw new Error(serverUploadError?.message || `Storage upload failed: ${directUploadErr.message || 'Error uploading file'}`);
-      }
+    let extractedUrl = '';
+    if (typeof data.url === 'string') {
+      extractedUrl = data.url;
+    } else if (typeof data.publicUrl === 'string') {
+      extractedUrl = data.publicUrl;
+    } else if (typeof data.url?.publicUrl === 'string') {
+      extractedUrl = data.url.publicUrl;
+    } else if (typeof data.data?.url === 'string') {
+      extractedUrl = data.data.url;
+    } else if (typeof data.data?.publicUrl === 'string') {
+      extractedUrl = data.data.publicUrl;
     }
 
-    throw serverUploadError || new Error('Upload failed: Unable to upload file to storage. Please check your connection and try again.');
+    if (!extractedUrl || extractedUrl === '[object Object]' || !extractedUrl.startsWith('http')) {
+      throw new Error('Upload succeeded but server returned an invalid public URL.');
+    }
+
+    console.log(`[Upload Success] URL: "${extractedUrl}", Path: "${data.path || ''}"`);
+    return extractedUrl;
   },
 
   async uploadMediaFile(file: File, bucket = 'media'): Promise<MediaItem> {
