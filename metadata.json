@@ -1,0 +1,6 @@
+{
+  "name": "Mostafa Portfolio",
+  "description": "Production-ready personal portfolio web application with Supabase integration, full dark futuristic visual identity, public showcase routes, and secure Admin Dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
