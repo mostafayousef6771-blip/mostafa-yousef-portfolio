@@ -10,11 +10,12 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
 });
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseAdmin = supabaseUrl && serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : null;
 
-export async function verifyAdminToken(req: express.Request): Promise<{ authenticated: boolean; isAdmin: boolean; error?: string; userId?: string }> {
+export async function verifyAdminToken(req: express.Request): Promise<{ authenticated: boolean; isAdmin: boolean; error?: string; userId?: string; client?: any }> {
   const authHeader = req.headers.authorization || (req.headers['x-admin-token'] as string) || '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
@@ -22,11 +23,61 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
     return { authenticated: false, isAdmin: false, error: 'Unauthorized: Admin authentication token is required.' };
   }
 
-  if (!supabaseAdmin) {
-    return { authenticated: false, isAdmin: false, error: 'Server configuration error: Supabase Admin client is not initialized.' };
+  const targetUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || supabaseUrl;
+  const targetAnon = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || anonKey;
+
+  if (!targetUrl) {
+    return { authenticated: false, isAdmin: false, error: 'Server configuration error: Supabase URL is not configured.' };
   }
 
-  const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token);
+  // 1. If service role client is available, verify through supabaseAdmin
+  if (supabaseAdmin) {
+    const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !userData?.user) {
+      return {
+        authenticated: false,
+        isAdmin: false,
+        error: `Unauthorized: Invalid or expired admin session (${authError?.message || 'User not found'}). Please log in again.`,
+      };
+    }
+
+    if (targetAnon) {
+      const userClient = createClient(targetUrl, targetAnon, {
+        global: {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      });
+
+      const { data: isAdminRes, error: rpcErr } = await userClient.rpc('is_admin');
+      if (rpcErr) {
+        console.warn('[verifyAdminToken] is_admin RPC error:', rpcErr.message);
+      }
+
+      if (isAdminRes !== true) {
+        return {
+          authenticated: true,
+          isAdmin: false,
+          userId: userData.user.id,
+          error: 'Forbidden: You do not have administrator permissions.',
+        };
+      }
+    }
+
+    return { authenticated: true, isAdmin: true, userId: userData.user.id, client: supabaseAdmin };
+  }
+
+  // 2. If service role is not configured, authenticate using userClient with anonKey and user's Bearer JWT
+  if (!targetAnon) {
+    return { authenticated: false, isAdmin: false, error: 'Server configuration error: Supabase Anon Key is not configured.' };
+  }
+
+  const userClient = createClient(targetUrl, targetAnon, {
+    global: {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  });
+
+  const { data: userData, error: authError } = await userClient.auth.getUser(token);
   if (authError || !userData?.user) {
     return {
       authenticated: false,
@@ -34,13 +85,6 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
       error: `Unauthorized: Invalid or expired admin session (${authError?.message || 'User not found'}). Please log in again.`,
     };
   }
-
-  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
-  const userClient = createClient(supabaseUrl, anonKey, {
-    global: {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  });
 
   const { data: isAdminRes, error: rpcErr } = await userClient.rpc('is_admin');
   if (rpcErr) {
@@ -56,7 +100,7 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
     };
   }
 
-  return { authenticated: true, isAdmin: true, userId: userData.user.id };
+  return { authenticated: true, isAdmin: true, userId: userData.user.id, client: userClient };
 }
 
 export function createApiApp(): express.Express {
@@ -198,8 +242,9 @@ export function createApiApp(): express.Express {
         return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
       }
 
-      if (!supabaseAdmin) {
-        return res.status(500).json({ success: false, error: 'Supabase admin client is not initialized on server.' });
+      const clientToUse = auth.client || supabaseAdmin;
+      if (!clientToUse) {
+        return res.status(500).json({ success: false, error: 'Supabase client is not initialized on server.' });
       }
 
       const { table, item } = req.body || {};
@@ -216,7 +261,7 @@ export function createApiApp(): express.Express {
         return res.status(400).json({ success: false, error: `Invalid table name "${table}".` });
       }
 
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await clientToUse
         .from(table.toLowerCase())
         .upsert(item)
         .select()
@@ -247,8 +292,9 @@ export function createApiApp(): express.Express {
         return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
       }
 
-      if (!supabaseAdmin) {
-        return res.status(500).json({ success: false, error: 'Supabase admin client is not initialized on server.' });
+      const clientToUse = auth.client || supabaseAdmin;
+      if (!clientToUse) {
+        return res.status(500).json({ success: false, error: 'Supabase client is not initialized on server.' });
       }
 
       const { table, id } = req.body || {};
@@ -265,7 +311,7 @@ export function createApiApp(): express.Express {
         return res.status(400).json({ success: false, error: `Invalid table name "${table}".` });
       }
 
-      const { error } = await supabaseAdmin
+      const { error } = await clientToUse
         .from(table.toLowerCase())
         .delete()
         .eq('id', id);
@@ -313,7 +359,8 @@ export function createApiApp(): express.Express {
           return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
         }
 
-        if (!supabaseAdmin) {
+        const clientToUse = auth.client || supabaseAdmin;
+        if (!clientToUse) {
           return res.status(500).json({ success: false, error: 'Supabase storage service is not configured on the server.' });
         }
 
@@ -327,7 +374,7 @@ export function createApiApp(): express.Express {
         const filePath = `${Date.now()}_${sanitizedName}`;
 
         try {
-          await supabaseAdmin.storage.createBucket(bucket, {
+          await clientToUse.storage.createBucket(bucket, {
             public: true,
             fileSizeLimit: 15728640,
           });
@@ -335,7 +382,7 @@ export function createApiApp(): express.Express {
           // Bucket creation fails if already existing, safely ignore
         }
 
-        const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage.from(bucket).upload(filePath, file.buffer, {
+        const { data: uploadData, error: uploadErr } = await clientToUse.storage.from(bucket).upload(filePath, file.buffer, {
           contentType: file.mimetype || 'application/octet-stream',
           cacheControl: '3600',
           upsert: true,
@@ -347,21 +394,35 @@ export function createApiApp(): express.Express {
         }
 
         const uploadedStoragePath = uploadData?.path || filePath;
-        const publicUrlResult = supabaseAdmin.storage.from(bucket).getPublicUrl(uploadedStoragePath);
-        const rawPublicData: any = publicUrlResult?.data ?? publicUrlResult;
         let publicUrl = '';
 
-        if (typeof rawPublicData === 'string') {
-          publicUrl = rawPublicData;
-        } else if (typeof rawPublicData?.publicUrl === 'string') {
-          publicUrl = rawPublicData.publicUrl;
-        } else if (typeof rawPublicData?.publicURL === 'string') {
-          publicUrl = rawPublicData.publicURL;
-        } else if (typeof publicUrlResult === 'string') {
-          publicUrl = publicUrlResult;
+        try {
+          const publicUrlResult = clientToUse.storage.from(bucket).getPublicUrl(uploadedStoragePath);
+          const rawPublicData: any = publicUrlResult?.data ?? publicUrlResult;
+
+          if (typeof rawPublicData === 'string' && rawPublicData.startsWith('http')) {
+            publicUrl = rawPublicData;
+          } else if (typeof rawPublicData?.publicUrl === 'string' && rawPublicData.publicUrl.startsWith('http')) {
+            publicUrl = rawPublicData.publicUrl;
+          } else if (typeof rawPublicData?.publicURL === 'string' && rawPublicData.publicURL.startsWith('http')) {
+            publicUrl = rawPublicData.publicURL;
+          } else if (typeof publicUrlResult === 'string' && publicUrlResult.startsWith('http')) {
+            publicUrl = publicUrlResult;
+          }
+        } catch (getErr) {
+          console.warn('[getPublicUrl Exception]', getErr);
         }
 
-        if (!publicUrl || publicUrl === '[object Object]') {
+        const targetBaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || supabaseUrl || '';
+        const cleanBase = targetBaseUrl.replace(/\/+$/, '');
+
+        if (!publicUrl || publicUrl === '[object Object]' || !publicUrl.startsWith('http')) {
+          if (cleanBase) {
+            publicUrl = `${cleanBase}/storage/v1/object/public/${bucket}/${uploadedStoragePath}`;
+          }
+        }
+
+        if (!publicUrl || publicUrl === '[object Object]' || !publicUrl.startsWith('http')) {
           return res.status(500).json({ success: false, error: 'Failed to generate public URL for uploaded file.' });
         }
 
@@ -404,11 +465,12 @@ export function createApiApp(): express.Express {
         return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
       }
 
-      if (!supabaseAdmin) {
+      const clientToUse = auth.client || supabaseAdmin;
+      if (!clientToUse) {
         return res.status(500).json({ success: false, error: 'Supabase storage is not configured on the server.' });
       }
 
-      const { data, error } = await supabaseAdmin.storage.from(bucket).remove([filePath]);
+      const { data, error } = await clientToUse.storage.from(bucket).remove([filePath]);
       if (error) {
         return res.status(400).json({ success: false, error: `Delete failed: ${error.message}` });
       }
