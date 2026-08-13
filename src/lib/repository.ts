@@ -200,31 +200,46 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        if (current.id) {
-          const { data, error } = await supabase
-            .from('profile')
-            .update(updated)
-            .eq('id', current.id)
-            .select()
-            .single();
-          if (!error && data) return data as Profile;
-        } else {
-          const { data, error } = await supabase
-            .from('profile')
-            .insert([updated])
-            .select()
-            .single();
-          if (!error && data) return data as Profile;
+    let result: Profile | null = null;
+    let lastError: Error | null = null;
+
+    try {
+      result = await apiAdminSave<Profile>('profile', updated);
+    } catch (err: any) {
+      lastError = err;
+      if (isSupabaseConfigured() && supabase) {
+        try {
+          if (current.id) {
+            const { data, error } = await supabase
+              .from('profile')
+              .update(updated)
+              .eq('id', current.id)
+              .select()
+              .single();
+            if (!error && data) result = data as Profile;
+            else if (error) lastError = new Error(error.message);
+          } else {
+            const { data, error } = await supabase
+              .from('profile')
+              .insert([updated])
+              .select()
+              .single();
+            if (!error && data) result = data as Profile;
+            else if (error) lastError = new Error(error.message);
+          }
+        } catch (e: any) {
+          lastError = e;
         }
-      } catch (err) {
-        console.warn('Supabase update profile error', err);
       }
     }
 
-    setLocalItem(STORAGE_KEYS.PROFILE, updated);
-    return updated;
+    if (!result && lastError) {
+      throw lastError;
+    }
+
+    const saved = result || updated;
+    setLocalItem(STORAGE_KEYS.PROFILE, saved);
+    return saved;
   },
 
   // --------------------------------------------------
@@ -256,27 +271,42 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        if (current.id) {
-          const { data, error } = await supabase
-            .from('about')
-            .update(updated)
-            .eq('id', current.id)
-            .select()
-            .single();
-          if (!error && data) return data as About;
-        } else {
-          const { data, error } = await supabase.from('about').insert([updated]).select().single();
-          if (!error && data) return data as About;
+    let result: About | null = null;
+    let lastError: Error | null = null;
+
+    try {
+      result = await apiAdminSave<About>('about', updated);
+    } catch (err: any) {
+      lastError = err;
+      if (isSupabaseConfigured() && supabase) {
+        try {
+          if (current.id) {
+            const { data, error } = await supabase
+              .from('about')
+              .update(updated)
+              .eq('id', current.id)
+              .select()
+              .single();
+            if (!error && data) result = data as About;
+            else if (error) lastError = new Error(error.message);
+          } else {
+            const { data, error } = await supabase.from('about').insert([updated]).select().single();
+            if (!error && data) result = data as About;
+            else if (error) lastError = new Error(error.message);
+          }
+        } catch (e: any) {
+          lastError = e;
         }
-      } catch (err) {
-        console.warn('Supabase update about error', err);
       }
     }
 
-    setLocalItem(STORAGE_KEYS.ABOUT, updated);
-    return updated;
+    if (!result && lastError) {
+      throw lastError;
+    }
+
+    const saved = result || updated;
+    setLocalItem(STORAGE_KEYS.ABOUT, saved);
+    return saved;
   },
 
   // --------------------------------------------------
@@ -1212,22 +1242,37 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        if (current.id) {
-          const { data, error } = await supabase.from('site_settings').update(updated).eq('id', current.id).select().single();
-          if (!error && data) return data as SiteSettings;
-        } else {
-          const { data, error } = await supabase.from('site_settings').insert([updated]).select().single();
-          if (!error && data) return data as SiteSettings;
+    let result: SiteSettings | null = null;
+    let lastError: Error | null = null;
+
+    try {
+      result = await apiAdminSave<SiteSettings>('site_settings', updated);
+    } catch (err: any) {
+      lastError = err;
+      if (isSupabaseConfigured() && supabase) {
+        try {
+          if (current.id) {
+            const { data, error } = await supabase.from('site_settings').update(updated).eq('id', current.id).select().single();
+            if (!error && data) result = data as SiteSettings;
+            else if (error) lastError = new Error(error.message);
+          } else {
+            const { data, error } = await supabase.from('site_settings').insert([updated]).select().single();
+            if (!error && data) result = data as SiteSettings;
+            else if (error) lastError = new Error(error.message);
+          }
+        } catch (e: any) {
+          lastError = e;
         }
-      } catch (err) {
-        console.warn('Supabase update settings error', err);
       }
     }
 
-    setLocalItem(STORAGE_KEYS.SETTINGS, updated);
-    return updated;
+    if (!result && lastError) {
+      throw lastError;
+    }
+
+    const saved = result || updated;
+    setLocalItem(STORAGE_KEYS.SETTINGS, saved);
+    return saved;
   },
 
   // --------------------------------------------------
@@ -1253,21 +1298,35 @@ export const repository = {
       created_at: new Date().toISOString(),
     };
 
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        const { data, error } = await supabase.from('media').insert([newItem]).select().single();
-        if (!error && data) return data as MediaItem;
-      } catch (err) {
-        console.warn('Supabase add media error', err);
+    let result: MediaItem | null = null;
+    let lastError: Error | null = null;
+
+    try {
+      result = await apiAdminSave<MediaItem>('media', newItem);
+    } catch (err: any) {
+      lastError = err;
+      if (isSupabaseConfigured() && supabase) {
+        try {
+          const { data, error } = await supabase.from('media').insert([newItem]).select().single();
+          if (!error && data) result = data as MediaItem;
+          else if (error) lastError = new Error(error.message);
+        } catch (e: any) {
+          lastError = e;
+        }
       }
     }
 
-    list.unshift(newItem);
+    if (!result && lastError) {
+      throw lastError;
+    }
+
+    const saved = result || newItem;
+    list.unshift(saved);
     setLocalItem(STORAGE_KEYS.MEDIA, list);
-    return newItem;
+    return saved;
   },
 
-  async uploadFile(file: File, bucket = 'media'): Promise<string> {
+  async uploadFile(file: File, bucket = 'portfolio-media'): Promise<string> {
     const MAX_SIZE = 15 * 1024 * 1024;
     if (file.size > MAX_SIZE) {
       throw new Error(`File size exceeds limit of 15MB (${(file.size / (1024 * 1024)).toFixed(1)}MB)`);
@@ -1283,6 +1342,7 @@ export const repository = {
     let serverUploadSuccess = false;
     let extractedUrl = '';
     let uploadedPath = '';
+    let serverUploadError: Error | null = null;
 
     try {
       const formData = new FormData();
@@ -1302,15 +1362,15 @@ export const repository = {
         body: formData,
       });
 
-      if (response.ok) {
-        const responseText = await response.text();
-        let data: any = {};
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          data = {};
-        }
+      const responseText = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = {};
+      }
 
+      if (response.ok && data.success) {
         if (typeof data.url === 'string') {
           extractedUrl = data.url;
         } else if (typeof data.publicUrl === 'string') {
@@ -1331,9 +1391,14 @@ export const repository = {
           serverUploadSuccess = true;
           uploadedPath = data.path || '';
         }
+      } else if (!response.ok) {
+        const errorMsg = data.error || `Server upload endpoint failed with HTTP ${response.status}`;
+        console.warn('[Upload Server Endpoint Error]', errorMsg);
+        serverUploadError = new Error(errorMsg);
       }
-    } catch (serverErr) {
-      console.warn('[Upload Server Endpoint Note] Backend endpoint unavailable, switching to client storage:', serverErr);
+    } catch (serverErr: any) {
+      console.warn('[Upload Server Endpoint Exception]', serverErr);
+      serverUploadError = serverErr;
     }
 
     if (serverUploadSuccess && extractedUrl) {
@@ -1382,11 +1447,11 @@ export const repository = {
         }
       } else if (directUploadErr) {
         console.error('[Direct Supabase Storage Error]', directUploadErr);
-        throw new Error(`Storage upload failed: ${directUploadErr.message || 'Error uploading file'}`);
+        throw new Error(serverUploadError?.message || `Storage upload failed: ${directUploadErr.message || 'Error uploading file'}`);
       }
     }
 
-    throw new Error('Upload failed: Unable to upload file to storage. Please check your connection and try again.');
+    throw serverUploadError || new Error('Upload failed: Unable to upload file to storage. Please check your connection and try again.');
   },
 
   async uploadMediaFile(file: File, bucket = 'media'): Promise<MediaItem> {

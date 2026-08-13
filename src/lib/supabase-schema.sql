@@ -271,7 +271,44 @@ CREATE POLICY "Admin delete site_settings" ON public.site_settings FOR DELETE TO
 CREATE POLICY "Admin write media" ON public.media FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 CREATE POLICY "Admin delete media" ON public.media FOR DELETE TO authenticated USING (public.is_admin());
 
--- STORAGE BUCKET CREATION INSTRUCTIONS:
--- In Supabase Dashboard -> Storage -> Create Buckets:
--- 1) Create a public bucket named: "portfolio-media"
--- 2) Create a public bucket named: "resumes"
+-- STORAGE BUCKETS AND STORAGE POLICIES
+-- 1) Create default storage buckets if they do not exist
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES 
+  ('portfolio-media', 'portfolio-media', true, 15728640, NULL),
+  ('media', 'media', true, 15728640, NULL),
+  ('profile', 'profile', true, 15728640, NULL),
+  ('projects', 'projects', true, 15728640, NULL),
+  ('certificates', 'certificates', true, 15728640, NULL),
+  ('resume', 'resume', true, 15728640, NULL),
+  ('resumes', 'resumes', true, 15728640, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- 2) Allow public read access to storage objects in portfolio buckets
+CREATE POLICY "Public Read Storage Objects" ON storage.objects
+FOR SELECT USING (bucket_id IN ('portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes'));
+
+-- 3) Allow authenticated admins to upload/insert storage objects
+CREATE POLICY "Admin Insert Storage Objects" ON storage.objects
+FOR INSERT TO authenticated WITH CHECK (
+  bucket_id IN ('portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes') 
+  AND public.is_admin()
+);
+
+-- 4) Allow authenticated admins to update storage objects
+CREATE POLICY "Admin Update Storage Objects" ON storage.objects
+FOR UPDATE TO authenticated USING (
+  bucket_id IN ('portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes')
+  AND public.is_admin()
+) WITH CHECK (
+  bucket_id IN ('portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes')
+  AND public.is_admin()
+);
+
+-- 5) Allow authenticated admins to delete storage objects
+CREATE POLICY "Admin Delete Storage Objects" ON storage.objects
+FOR DELETE TO authenticated USING (
+  bucket_id IN ('portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes')
+  AND public.is_admin()
+);
+
