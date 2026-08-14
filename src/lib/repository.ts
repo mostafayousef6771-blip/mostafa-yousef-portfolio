@@ -13,7 +13,7 @@ import {
   SiteSettings,
   MediaItem,
 } from '../types/portfolio';
-import { supabase, isSupabaseConfigured, initializeSupabase, supabaseUrl } from './supabase';
+import { supabase, isSupabaseConfigured, initializeSupabase } from './supabase';
 
 const STORAGE_KEYS = {
   PROFILE: 'mostafa_portfolio_profile_v1',
@@ -51,6 +51,100 @@ function setLocalItem<T>(key: string, value: T): void {
 }
 
 // --------------------------------------------------
+// DEFENSIVE PUBLIC URL EXTRACTOR
+// Prevents [object Object] across all upload and media response formats
+// --------------------------------------------------
+export function extractPublicUrl(response: any): string {
+  if (!response) {
+    throw new Error('Upload failed: Server returned an empty response.');
+  }
+
+  // 1. Direct string check
+  if (typeof response === 'string') {
+    const trimmed = response.trim();
+    if (
+      trimmed &&
+      trimmed !== '[object Object]' &&
+      (trimmed.startsWith('http://') || trimmed.startsWith('https://'))
+    ) {
+      return trimmed;
+    }
+  }
+
+  // 2. Defensive check across known response shapes
+  if (typeof response === 'object') {
+    const directCandidates = [
+      response.url,
+      response.publicUrl,
+      response.publicURL,
+      response.data?.url,
+      response.data?.publicUrl,
+      response.data?.publicURL,
+      response.data?.data?.url,
+      response.data?.data?.publicUrl,
+      response.data?.data?.publicURL,
+      response.result?.url,
+      response.result?.publicUrl,
+      response.result?.publicURL,
+      response.file_url,
+      response.data?.file_url,
+    ];
+
+    for (const cand of directCandidates) {
+      if (typeof cand === 'string') {
+        const trimmed = cand.trim();
+        if (
+          trimmed &&
+          trimmed !== '[object Object]' &&
+          (trimmed.startsWith('http://') || trimmed.startsWith('https://'))
+        ) {
+          return trimmed;
+        }
+      }
+    }
+
+    // 3. Deep search for any string matching http:// or https://
+    const findUrlDeep = (obj: any, depth = 0): string | null => {
+      if (depth > 4 || !obj || typeof obj !== 'object') return null;
+      for (const key of Object.keys(obj)) {
+        const val = obj[key];
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          if (
+            trimmed &&
+            trimmed !== '[object Object]' &&
+            (trimmed.startsWith('http://') || trimmed.startsWith('https://'))
+          ) {
+            return trimmed;
+          }
+        } else if (typeof val === 'object' && val !== null) {
+          const found = findUrlDeep(val, depth + 1);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const deepUrl = findUrlDeep(response);
+    if (deepUrl) {
+      return deepUrl;
+    }
+  }
+
+  // 4. If no valid URL found, format the actual response safely into the error
+  let detail = '';
+  try {
+    detail = typeof response === 'object' ? JSON.stringify(response) : String(response);
+  } catch {
+    detail = 'non-serializable object';
+  }
+
+  throw new Error(
+    `Upload failed: Could not extract a valid public URL starting with http:// or https://. Server response: ${detail}`
+  );
+}
+
+// --------------------------------------------------
 // SERVER API HELPERS (Secure Admin Operations & Fallback Reads)
 // --------------------------------------------------
 async function apiFetchData<T>(table: string): Promise<T[] | null> {
@@ -82,9 +176,13 @@ async function apiAdminSave<T>(table: string, item: any): Promise<T> {
   const sessionRes = await activeClient?.auth.getSession().catch(() => null);
   const token = sessionRes?.data?.session?.access_token || '';
 
+  if (!token) {
+    console.warn('[Admin Save Notice] No active admin JWT token found in session.');
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Accept': 'application/json',
+    Accept: 'application/json',
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -101,11 +199,13 @@ async function apiAdminSave<T>(table: string, item: any): Promise<T> {
   try {
     data = JSON.parse(resText);
   } catch {
-    throw new Error(`Server returned non-JSON response (HTTP ${res.status}): ${resText.substring(0, 100)}`);
+    throw new Error(`Server returned invalid response (HTTP ${res.status}): ${resText.substring(0, 120)}`);
   }
 
   if (!res.ok || !data.success || !data.data) {
-    throw new Error(data.error || `Save failed with HTTP ${res.status}`);
+    const errorMsg = data.error || `Save failed with HTTP ${res.status}`;
+    console.error(`[Admin Save Failed] Table: ${table}`, errorMsg);
+    throw new Error(errorMsg);
   }
 
   return data.data as T;
@@ -118,7 +218,7 @@ async function apiAdminDelete(table: string, id: string): Promise<void> {
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Accept': 'application/json',
+    Accept: 'application/json',
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -135,11 +235,13 @@ async function apiAdminDelete(table: string, id: string): Promise<void> {
   try {
     data = JSON.parse(resText);
   } catch {
-    throw new Error(`Server returned non-JSON response (HTTP ${res.status}): ${resText.substring(0, 100)}`);
+    throw new Error(`Server returned invalid response (HTTP ${res.status}): ${resText.substring(0, 120)}`);
   }
 
   if (!res.ok || !data.success) {
-    throw new Error(data.error || `Delete failed with HTTP ${res.status}`);
+    const errorMsg = data.error || `Delete failed with HTTP ${res.status}`;
+    console.error(`[Admin Delete Failed] Table: ${table}, ID: ${id}`, errorMsg);
+    throw new Error(errorMsg);
   }
 }
 
@@ -155,6 +257,12 @@ export const repository = {
         if (!error && data) result = data as Profile;
       } catch (err) {
         console.warn('Supabase fetch error, fallback to local', err);
+      }
+    }
+    if (!result) {
+      const apiData = await apiFetchData<Profile>('profile');
+      if (apiData && apiData.length > 0) {
+        result = apiData[0];
       }
     }
     if (!result) {
@@ -200,44 +308,8 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    let result: Profile | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Profile>('profile', updated);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          if (current.id) {
-            const { data, error } = await supabase
-              .from('profile')
-              .update(updated)
-              .eq('id', current.id)
-              .select()
-              .single();
-            if (!error && data) result = data as Profile;
-            else if (error) lastError = new Error(error.message);
-          } else {
-            const { data, error } = await supabase
-              .from('profile')
-              .insert([updated])
-              .select()
-              .single();
-            if (!error && data) result = data as Profile;
-            else if (error) lastError = new Error(error.message);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const saved = result || updated;
+    // Authoritative server-side admin save
+    const saved = await apiAdminSave<Profile>('profile', updated);
     setLocalItem(STORAGE_KEYS.PROFILE, saved);
     return saved;
   },
@@ -253,6 +325,10 @@ export const repository = {
       } catch (err) {
         console.warn('Supabase fetch error', err);
       }
+    }
+    const apiData = await apiFetchData<About>('about');
+    if (apiData && apiData.length > 0) {
+      return apiData[0];
     }
     return getLocalItem<About | null>(STORAGE_KEYS.ABOUT, null);
   },
@@ -271,40 +347,7 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    let result: About | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<About>('about', updated);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          if (current.id) {
-            const { data, error } = await supabase
-              .from('about')
-              .update(updated)
-              .eq('id', current.id)
-              .select()
-              .single();
-            if (!error && data) result = data as About;
-            else if (error) lastError = new Error(error.message);
-          } else {
-            const { data, error } = await supabase.from('about').insert([updated]).select().single();
-            if (!error && data) result = data as About;
-            else if (error) lastError = new Error(error.message);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const saved = result || updated;
+    const saved = await apiAdminSave<About>('about', updated);
     setLocalItem(STORAGE_KEYS.ABOUT, saved);
     return saved;
   },
@@ -346,29 +389,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: Skill | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Skill>('skills', skillItem);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('skills').upsert(skillItem).select().single();
-          if (!error && data) result = data as Skill;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || skillItem;
+    const savedItem = await apiAdminSave<Skill>('skills', skillItem);
     const index = skills.findIndex((s) => s.id === id);
     if (index >= 0) {
       skills[index] = { ...skills[index], ...savedItem };
@@ -380,33 +401,7 @@ export const repository = {
   },
 
   async deleteSkill(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('skills', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('skills').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
-
+    await apiAdminDelete('skills', id);
     const skills = getLocalItem<Skill[]>(STORAGE_KEYS.SKILLS, []).filter((s) => s.id !== id);
     setLocalItem(STORAGE_KEYS.SKILLS, skills);
   },
@@ -473,29 +468,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: Project | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Project>('projects', item);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('projects').upsert(item).select().single();
-          if (!error && data) result = data as Project;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || item;
+    const savedItem = await apiAdminSave<Project>('projects', item);
     const idx = projects.findIndex((p) => p.id === id);
     if (idx >= 0) {
       projects[idx] = { ...projects[idx], ...savedItem };
@@ -507,32 +480,7 @@ export const repository = {
   },
 
   async deleteProject(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('projects', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('projects').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('projects', id);
     const projects = getLocalItem<Project[]>(STORAGE_KEYS.PROJECTS, []).filter((p) => p.id !== id);
     setLocalItem(STORAGE_KEYS.PROJECTS, projects);
   },
@@ -577,29 +525,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: Certificate | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Certificate>('certificates', item);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('certificates').upsert(item).select().single();
-          if (!error && data) result = data as Certificate;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || item;
+    const savedItem = await apiAdminSave<Certificate>('certificates', item);
     const idx = list.findIndex((c) => c.id === id);
     if (idx >= 0) list[idx] = { ...list[idx], ...savedItem };
     else list.push(savedItem);
@@ -608,32 +534,7 @@ export const repository = {
   },
 
   async deleteCertificate(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('certificates', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('certificates').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('certificates', id);
     const list = getLocalItem<Certificate[]>(STORAGE_KEYS.CERTIFICATES, []).filter((c) => c.id !== id);
     setLocalItem(STORAGE_KEYS.CERTIFICATES, list);
   },
@@ -678,29 +579,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: Experience | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Experience>('experience', item);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('experience').upsert(item).select().single();
-          if (!error && data) result = data as Experience;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || item;
+    const savedItem = await apiAdminSave<Experience>('experience', item);
     const idx = list.findIndex((e) => e.id === id);
     if (idx >= 0) list[idx] = { ...list[idx], ...savedItem };
     else list.push(savedItem);
@@ -709,32 +588,7 @@ export const repository = {
   },
 
   async deleteExperience(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('experience', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('experience').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('experience', id);
     const list = getLocalItem<Experience[]>(STORAGE_KEYS.EXPERIENCE, []).filter((e) => e.id !== id);
     setLocalItem(STORAGE_KEYS.EXPERIENCE, list);
   },
@@ -780,29 +634,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: Education | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Education>('education', item);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('education').upsert(item).select().single();
-          if (!error && data) result = data as Education;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || item;
+    const savedItem = await apiAdminSave<Education>('education', item);
     const idx = list.findIndex((e) => e.id === id);
     if (idx >= 0) list[idx] = { ...list[idx], ...savedItem };
     else list.push(savedItem);
@@ -811,32 +643,7 @@ export const repository = {
   },
 
   async deleteEducation(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('education', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('education').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('education', id);
     const list = getLocalItem<Education[]>(STORAGE_KEYS.EDUCATION, []).filter((e) => e.id !== id);
     setLocalItem(STORAGE_KEYS.EDUCATION, list);
   },
@@ -884,29 +691,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: Review | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Review>('reviews', item);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('reviews').upsert(item).select().single();
-          if (!error && data) result = data as Review;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || item;
+    const savedItem = await apiAdminSave<Review>('reviews', item);
     const idx = list.findIndex((r) => r.id === id);
     if (idx >= 0) list[idx] = { ...list[idx], ...savedItem };
     else list.push(savedItem);
@@ -915,32 +700,7 @@ export const repository = {
   },
 
   async deleteReview(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('reviews', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('reviews').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('reviews', id);
     const list = getLocalItem<Review[]>(STORAGE_KEYS.REVIEWS, []).filter((r) => r.id !== id);
     setLocalItem(STORAGE_KEYS.REVIEWS, list);
   },
@@ -985,29 +745,7 @@ export const repository = {
       updated_at: now,
     };
 
-    let result: SocialLink | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<SocialLink>('social_links', item);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('social_links').upsert(item).select().single();
-          if (!error && data) result = data as SocialLink;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || item;
+    const savedItem = await apiAdminSave<SocialLink>('social_links', item);
     const idx = list.findIndex((s) => s.id === id);
     if (idx >= 0) list[idx] = { ...list[idx], ...savedItem };
     else list.push(savedItem);
@@ -1016,32 +754,7 @@ export const repository = {
   },
 
   async deleteSocialLink(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('social_links', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('social_links').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('social_links', id);
     const list = getLocalItem<SocialLink[]>(STORAGE_KEYS.SOCIAL_LINKS, []).filter((s) => s.id !== id);
     setLocalItem(STORAGE_KEYS.SOCIAL_LINKS, list);
   },
@@ -1083,29 +796,7 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    let result: Resume | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<Resume>('resume', updated);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('resume').upsert(updated).select().single();
-          if (!error && data) result = data as Resume;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const savedItem = result || updated;
+    const savedItem = await apiAdminSave<Resume>('resume', updated);
     setLocalItem(STORAGE_KEYS.RESUME, savedItem);
     return savedItem;
   },
@@ -1163,14 +854,8 @@ export const repository = {
   async markMessageRead(id: string, is_read = true): Promise<void> {
     try {
       await apiAdminSave('messages', { id, is_read });
-    } catch {
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          await supabase.from('messages').update({ is_read }).eq('id', id);
-        } catch (err) {
-          console.warn('Supabase mark read error', err);
-        }
-      }
+    } catch (err) {
+      console.warn('Admin mark message read notice:', err);
     }
     const list = await this.getMessages();
     const item = list.find((m) => m.id === id);
@@ -1179,32 +864,7 @@ export const repository = {
   },
 
   async deleteMessage(id: string): Promise<void> {
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('messages', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      const activeClient = (await initializeSupabase()) || supabase;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('messages').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('messages', id);
     const list = getLocalItem<ContactMessage[]>(STORAGE_KEYS.MESSAGES, []).filter((m) => m.id !== id);
     setLocalItem(STORAGE_KEYS.MESSAGES, list);
   },
@@ -1242,35 +902,7 @@ export const repository = {
       updated_at: new Date().toISOString(),
     };
 
-    let result: SiteSettings | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<SiteSettings>('site_settings', updated);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          if (current.id) {
-            const { data, error } = await supabase.from('site_settings').update(updated).eq('id', current.id).select().single();
-            if (!error && data) result = data as SiteSettings;
-            else if (error) lastError = new Error(error.message);
-          } else {
-            const { data, error } = await supabase.from('site_settings').insert([updated]).select().single();
-            if (!error && data) result = data as SiteSettings;
-            else if (error) lastError = new Error(error.message);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const saved = result || updated;
+    const saved = await apiAdminSave<SiteSettings>('site_settings', updated);
     setLocalItem(STORAGE_KEYS.SETTINGS, saved);
     return saved;
   },
@@ -1298,29 +930,7 @@ export const repository = {
       created_at: new Date().toISOString(),
     };
 
-    let result: MediaItem | null = null;
-    let lastError: Error | null = null;
-
-    try {
-      result = await apiAdminSave<MediaItem>('media', newItem);
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && supabase) {
-        try {
-          const { data, error } = await supabase.from('media').insert([newItem]).select().single();
-          if (!error && data) result = data as MediaItem;
-          else if (error) lastError = new Error(error.message);
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!result && lastError) {
-      throw lastError;
-    }
-
-    const saved = result || newItem;
+    const saved = await apiAdminSave<MediaItem>('media', newItem);
     list.unshift(saved);
     setLocalItem(STORAGE_KEYS.MEDIA, list);
     return saved;
@@ -1332,7 +942,7 @@ export const repository = {
       throw new Error(`File size exceeds limit of 15MB (${(file.size / (1024 * 1024)).toFixed(1)}MB)`);
     }
 
-    console.log(`[Upload Request] File: "${file.name}" (${file.size} bytes, ${file.type || 'unknown type'}), Bucket: "${bucket}"`);
+    console.log(`[Upload Request] File: "${file.name}" (${file.size} bytes), Bucket: "${bucket}"`);
 
     const client = (await initializeSupabase()) || supabase;
     const sessionRes = await client?.auth.getSession().catch(() => null);
@@ -1370,23 +980,7 @@ export const repository = {
       throw new Error(errorMsg);
     }
 
-    let extractedUrl = '';
-    if (typeof data.url === 'string') {
-      extractedUrl = data.url;
-    } else if (typeof data.publicUrl === 'string') {
-      extractedUrl = data.publicUrl;
-    } else if (typeof data.url?.publicUrl === 'string') {
-      extractedUrl = data.url.publicUrl;
-    } else if (typeof data.data?.url === 'string') {
-      extractedUrl = data.data.url;
-    } else if (typeof data.data?.publicUrl === 'string') {
-      extractedUrl = data.data.publicUrl;
-    }
-
-    if (!extractedUrl || extractedUrl === '[object Object]' || !extractedUrl.startsWith('http')) {
-      throw new Error('Upload succeeded but server returned an invalid public URL.');
-    }
-
+    const extractedUrl = extractPublicUrl(data);
     console.log(`[Upload Success] URL: "${extractedUrl}", Path: "${data.path || ''}"`);
     return extractedUrl;
   },
@@ -1459,31 +1053,7 @@ export const repository = {
       await this.deleteStorageFile(fileBucket, filePath);
     }
 
-    let lastError: Error | null = null;
-    let deletedSuccess = false;
-
-    try {
-      await apiAdminDelete('media', id);
-      deletedSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-      if (isSupabaseConfigured() && activeClient) {
-        try {
-          const { error } = await activeClient.from('media').delete().eq('id', id);
-          if (!error) {
-            deletedSuccess = true;
-          } else {
-            lastError = new Error(`Delete failed: ${error.message} (${error.code})`);
-          }
-        } catch (e: any) {
-          lastError = e;
-        }
-      }
-    }
-
-    if (!deletedSuccess && lastError) {
-      throw lastError;
-    }
+    await apiAdminDelete('media', id);
 
     const list = getLocalItem<MediaItem[]>(STORAGE_KEYS.MEDIA, []);
     const updated = list.filter((m) => m.id !== id);

@@ -31,6 +31,7 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
   const [tagsInput, setTagsInput] = useState('');
   const [galleryInput, setGalleryInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingGallery, setUploadingGallery] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -111,6 +112,7 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
     setGalleryInput('');
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (project: Project) => {
@@ -119,17 +121,20 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
     setGalleryInput((project.gallery || []).join('\n'));
     setEditingId(project.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title) return;
     setSaving(true);
+    setSaveError(null);
 
     const parsedTags = tagsInput
       .split(',')
@@ -161,8 +166,9 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
 
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving project:', err);
+      setSaveError(err.message || 'Failed to save project.');
     } finally {
       setSaving(false);
     }
@@ -225,6 +231,13 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {saveError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

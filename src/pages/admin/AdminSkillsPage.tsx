@@ -23,6 +23,7 @@ export const AdminSkillsPage: React.FC<AdminSkillsPageProps> = ({ skills = [], o
   });
 
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -38,23 +39,27 @@ export const AdminSkillsPage: React.FC<AdminSkillsPageProps> = ({ skills = [], o
     });
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (skill: Skill) => {
     setFormData(skill);
     setEditingId(skill.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name) return;
     setSaving(true);
+    setSaveError(null);
     try {
       await repository.saveSkill({
         id: isNew ? undefined : editingId!,
@@ -67,8 +72,9 @@ export const AdminSkillsPage: React.FC<AdminSkillsPageProps> = ({ skills = [], o
       });
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving skill:', err);
+      setSaveError(err.message || 'Failed to save skill.');
     } finally {
       setSaving(false);
     }
@@ -123,6 +129,13 @@ export const AdminSkillsPage: React.FC<AdminSkillsPageProps> = ({ skills = [], o
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {saveError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>

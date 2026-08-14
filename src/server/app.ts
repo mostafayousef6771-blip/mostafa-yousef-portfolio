@@ -34,10 +34,16 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
 
   const targetUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
   const targetAnon = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '';
   const adminClient = getSupabaseAdmin();
 
   if (!targetUrl) {
     return { authenticated: false, isAdmin: false, error: 'Server configuration error: Supabase URL is not configured.' };
+  }
+
+  // Direct service role key authorization
+  if (serviceKey && token === serviceKey) {
+    return { authenticated: true, isAdmin: true, userId: 'service_role', client: adminClient };
   }
 
   // 1. If service role client is available, verify token and check admin status
@@ -360,17 +366,48 @@ export function createApiApp(): express.Express {
         return res.status(400).json({ success: false, error: multerErr.message || 'Error processing uploaded file.' });
       }
 
+      const safeBucket = (req.body?.bucket || 'portfolio-media').trim().toLowerCase();
+      const safeFilename = req.file?.originalname ? req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_') : 'unknown';
+
       try {
         const file = req.file;
         if (!file) {
+          console.warn('[Upload Request Info]', {
+            method: req.method,
+            path: req.path || req.originalUrl,
+            authenticated: false,
+            bucket: safeBucket,
+            filename: 'none',
+            status: 400,
+            result: 'no_file',
+          });
           return res.status(400).json({ success: false, error: 'No file provided in request.' });
         }
 
         const auth = await verifyAdminToken(req);
         if (!auth.authenticated) {
+          console.warn('[Upload Request Info]', {
+            method: req.method,
+            path: req.path || req.originalUrl,
+            authenticated: false,
+            bucket: safeBucket,
+            filename: safeFilename,
+            status: 401,
+            result: 'unauthorized',
+          });
           return res.status(401).json({ success: false, error: auth.error || 'Unauthorized request.' });
         }
         if (!auth.isAdmin) {
+          console.warn('[Upload Request Info]', {
+            method: req.method,
+            path: req.path || req.originalUrl,
+            authenticated: true,
+            isAdmin: false,
+            bucket: safeBucket,
+            filename: safeFilename,
+            status: 403,
+            result: 'forbidden',
+          });
           return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
         }
 
@@ -379,14 +416,13 @@ export function createApiApp(): express.Express {
           return res.status(500).json({ success: false, error: 'Supabase storage service is not configured on the server.' });
         }
 
-        const bucket = (req.body?.bucket || 'portfolio-media').trim().toLowerCase();
+        const bucket = safeBucket;
         const allowedBuckets = ['portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes', 'avatars'];
         if (!allowedBuckets.includes(bucket)) {
           return res.status(400).json({ success: false, error: `Invalid storage bucket "${bucket}". Allowed buckets: ${allowedBuckets.join(', ')}` });
         }
 
-        const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const filePath = `${Date.now()}_${sanitizedName}`;
+        const filePath = `${Date.now()}_${safeFilename}`;
 
         try {
           await clientToUse.storage.createBucket(bucket, {
@@ -404,7 +440,16 @@ export function createApiApp(): express.Express {
         });
 
         if (uploadErr) {
-          console.error(`[Storage Upload Error] Bucket: ${bucket}, File: ${filePath}`, uploadErr);
+          console.error('[Upload Request Info]', {
+            method: req.method,
+            path: req.path || req.originalUrl,
+            authenticated: true,
+            bucket,
+            filename: safeFilename,
+            uploadSuccess: false,
+            status: 400,
+            error: uploadErr.message,
+          });
           return res.status(400).json({ success: false, error: `Storage upload failed: ${uploadErr.message || 'Unknown storage error'}` });
         }
 
@@ -438,10 +483,29 @@ export function createApiApp(): express.Express {
         }
 
         if (!publicUrl || publicUrl === '[object Object]' || !publicUrl.startsWith('http')) {
+          console.error('[Upload Request Info]', {
+            method: req.method,
+            path: req.path || req.originalUrl,
+            authenticated: true,
+            bucket,
+            filename: safeFilename,
+            uploadSuccess: true,
+            publicUrlGenerated: false,
+            status: 500,
+          });
           return res.status(500).json({ success: false, error: 'Failed to generate public URL for uploaded file.' });
         }
 
-        console.log(`[Storage Upload Success] Bucket: ${bucket}, Path: ${uploadedStoragePath}, URL: ${publicUrl}`);
+        console.log('[Upload Request Info]', {
+          method: req.method,
+          path: req.path || req.originalUrl,
+          authenticated: true,
+          bucket,
+          filename: safeFilename,
+          uploadSuccess: true,
+          status: 200,
+          responseShape: '{ success: true, url: string, publicUrl: string, path: string }',
+        });
 
         return res.status(200).json({
           success: true,

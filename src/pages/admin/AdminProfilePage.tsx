@@ -22,6 +22,7 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
 
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -50,18 +51,7 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
     setUploading(true);
     setUploadError(null);
     try {
-      const result: any = await repository.uploadFile(file, 'profile');
-      let finalUrl = '';
-      if (typeof result === 'string') {
-        finalUrl = result;
-      } else if (result && typeof result === 'object') {
-        finalUrl = result.url || result.publicUrl || result.data?.url || result.data?.publicUrl || '';
-      }
-
-      if (!finalUrl || finalUrl === '[object Object]') {
-        throw new Error('Avatar upload completed, but could not extract a valid image URL string.');
-      }
-
+      const finalUrl = await repository.uploadFile(file, 'profile');
       setFormData((prev) => ({ ...prev, avatar_url: finalUrl }));
     } catch (err: any) {
       setUploadError(err.message || 'Avatar upload failed. Please try again.');
@@ -75,13 +65,15 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
     e.preventDefault();
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
     try {
       await repository.updateProfile(formData);
       setSaved(true);
       onRefresh();
       setTimeout(() => setSaved(false), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving profile:', err);
+      setSaveError(err.message || 'Failed to save profile. Please check permissions.');
     } finally {
       setSaving(false);
     }
@@ -107,6 +99,12 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
           </div>
         )}
       </div>
+
+      {saveError && (
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+          <span>⚠️ {saveError}</span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl space-y-5">

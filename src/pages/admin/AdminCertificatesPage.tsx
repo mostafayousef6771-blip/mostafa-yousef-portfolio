@@ -28,6 +28,7 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
   });
 
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -94,23 +95,27 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
     });
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (cert: Certificate) => {
     setFormData(cert);
     setEditingId(cert.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title || !formData.issuer) return;
     setSaving(true);
+    setSaveError(null);
     try {
       await repository.saveCertificate({
         id: isNew ? undefined : editingId!,
@@ -126,8 +131,9 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
       });
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving certificate:', err);
+      setSaveError(err.message || 'Failed to save certificate.');
     } finally {
       setSaving(false);
     }
@@ -183,9 +189,17 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
             </button>
           </div>
 
+          {saveError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{saveError}</span>
+            </div>
+          )}
+
           {uploadError && (
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
-              {uploadError}
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{uploadError}</span>
             </div>
           )}
 
