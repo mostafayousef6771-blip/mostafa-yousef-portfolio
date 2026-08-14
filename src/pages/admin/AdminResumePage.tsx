@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Save, CheckCircle2, Download, ExternalLink, Calendar, Upload, Loader2 } from 'lucide-react';
 import { Resume } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 
 interface AdminResumePageProps {
   resume: Resume | null;
@@ -42,7 +42,8 @@ export const AdminResumePage: React.FC<AdminResumePageProps> = ({ resume = null,
         title: prev.title || file.name.replace(/\.[^/.]+$/, ''),
       }));
     } catch (err: any) {
-      setErrorMsg(err.message || 'Resume upload failed.');
+      console.error('Resume upload error:', err);
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -62,7 +63,7 @@ export const AdminResumePage: React.FC<AdminResumePageProps> = ({ resume = null,
       setTimeout(() => setSaved(false), 4000);
     } catch (err: any) {
       console.error('Error saving resume:', err);
-      setErrorMsg(err?.message || 'Failed to save resume settings. Check network or permissions.');
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setSaving(false);
     }

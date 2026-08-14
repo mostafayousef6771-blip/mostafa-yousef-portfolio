@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Image, Copy, Check, Upload, Trash2, ExternalLink, FileText, Loader2, Plus, AlertCircle } from 'lucide-react';
 import { MediaItem } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 export const AdminMediaPage: React.FC = () => {
@@ -52,7 +52,7 @@ export const AdminMediaPage: React.FC = () => {
       await loadMedia();
     } catch (err: any) {
       console.error('Error uploading media:', err);
-      setErrorMsg(err.message || 'Failed to upload file.');
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -77,7 +77,8 @@ export const AdminMediaPage: React.FC = () => {
       setNewUrl('');
       await loadMedia();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to add media URL.');
+      console.error('Error adding media URL:', err);
+      setErrorMsg(getErrorMessage(err));
     } finally {
       setUploading(false);
     }
@@ -99,7 +100,7 @@ export const AdminMediaPage: React.FC = () => {
       await loadMedia();
     } catch (err: any) {
       console.error('Failed to delete media:', err);
-      setDeleteError(err.message || 'Failed to delete media asset.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Award, Plus, Edit3, Trash2, Save, X, ExternalLink, Upload, Loader2, AlertCircle } from 'lucide-react';
 import { Certificate } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminCertificatesPageProps {
@@ -46,14 +46,11 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
     setUploadingImage(true);
     setUploadError(null);
     try {
-      const result: any = await repository.uploadFile(file, 'certificates');
-      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
-      if (!url || url === '[object Object]') {
-        throw new Error('Badge image upload completed, but could not extract a valid URL.');
-      }
+      const url = await repository.uploadFile(file, 'certificates');
       setFormData((prev) => ({ ...prev, image_url: url }));
     } catch (err: any) {
-      setUploadError(err.message || 'Badge upload failed.');
+      console.error('Badge upload error:', err);
+      setUploadError(getErrorMessage(err));
     } finally {
       setUploadingImage(false);
       if (badgeInputRef.current) badgeInputRef.current.value = '';
@@ -67,14 +64,11 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
     setUploadingPdf(true);
     setUploadError(null);
     try {
-      const result: any = await repository.uploadFile(file, 'certificates');
-      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
-      if (!url || url === '[object Object]') {
-        throw new Error('Certificate document upload completed, but could not extract a valid URL.');
-      }
+      const url = await repository.uploadFile(file, 'certificates');
       setFormData((prev) => ({ ...prev, pdf_url: url }));
     } catch (err: any) {
-      setUploadError(err.message || 'PDF upload failed.');
+      console.error('PDF upload error:', err);
+      setUploadError(getErrorMessage(err));
     } finally {
       setUploadingPdf(false);
       if (pdfInputRef.current) pdfInputRef.current.value = '';
@@ -133,7 +127,7 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
       handleCancel();
     } catch (err: any) {
       console.error('Error saving certificate:', err);
-      setSaveError(err.message || 'Failed to save certificate.');
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -149,7 +143,7 @@ export const AdminCertificatesPage: React.FC<AdminCertificatesPageProps> = ({
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete certificate:', err);
-      setDeleteError(err.message || 'Failed to delete certificate.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }

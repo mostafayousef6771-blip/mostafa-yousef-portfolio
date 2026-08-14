@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { FolderGit2, Plus, Edit3, Trash2, Eye, EyeOff, Save, X, ExternalLink, Github, Sparkles, Upload, Loader2, AlertCircle } from 'lucide-react';
 import { Project } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminProjectsPageProps {
@@ -49,14 +49,11 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
     setUploadingCover(true);
     setUploadError(null);
     try {
-      const result: any = await repository.uploadFile(file, 'projects');
-      const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
-      if (!url || url === '[object Object]') {
-        throw new Error('Cover upload completed, but could not extract a valid URL.');
-      }
+      const url = await repository.uploadFile(file, 'projects');
       setFormData((prev) => ({ ...prev, cover_image: url }));
     } catch (err: any) {
-      setUploadError(err.message || 'Cover image upload failed.');
+      console.error('Cover image upload error:', err);
+      setUploadError(getErrorMessage(err));
     } finally {
       setUploadingCover(false);
       if (coverInputRef.current) coverInputRef.current.value = '';
@@ -73,8 +70,7 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
       const uploadedUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const result: any = await repository.uploadFile(file, 'projects');
-        const url = typeof result === 'string' ? result : (result?.url || result?.publicUrl || '');
+        const url = await repository.uploadFile(file, 'projects');
         if (url && url !== '[object Object]') {
           uploadedUrls.push(url);
         }
@@ -85,7 +81,8 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
         return [...existing, ...uploadedUrls].join('\n');
       });
     } catch (err: any) {
-      setUploadError(err.message || 'Gallery upload failed.');
+      console.error('Gallery upload error:', err);
+      setUploadError(getErrorMessage(err));
     } finally {
       setUploadingGallery(false);
       if (galleryInputRef.current) galleryInputRef.current.value = '';
@@ -168,7 +165,7 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
       handleCancel();
     } catch (err: any) {
       console.error('Error saving project:', err);
-      setSaveError(err.message || 'Failed to save project.');
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -184,7 +181,7 @@ export const AdminProjectsPage: React.FC<AdminProjectsPageProps> = ({ projects =
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete project:', err);
-      setDeleteError(err.message || 'Failed to delete project.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }

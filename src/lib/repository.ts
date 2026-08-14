@@ -51,6 +51,77 @@ function setLocalItem<T>(key: string, value: T): void {
 }
 
 // --------------------------------------------------
+// SAFE ERROR MESSAGE EXTRACTOR
+// Guaranteed never to return [object Object] or unreadable strings
+// --------------------------------------------------
+export function getErrorMessage(error: unknown): string {
+  if (typeof error === 'string') {
+    const trimmed = error.trim();
+    if (trimmed && trimmed !== '[object Object]') {
+      return trimmed;
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    const msg = error.message.trim();
+    if (msg && msg !== '[object Object]') {
+      return msg;
+    }
+  }
+
+  if (error && typeof error === 'object') {
+    const e = error as Record<string, unknown>;
+
+    if (typeof e.message === 'string' && e.message.trim() && e.message.trim() !== '[object Object]') {
+      return e.message.trim();
+    }
+    if (typeof e.error === 'string' && e.error.trim() && e.error.trim() !== '[object Object]') {
+      return e.error.trim();
+    }
+    if (typeof e.details === 'string' && e.details.trim() && e.details.trim() !== '[object Object]') {
+      return e.details.trim();
+    }
+    if (typeof e.hint === 'string' && e.hint.trim() && e.hint.trim() !== '[object Object]') {
+      return e.hint.trim();
+    }
+    if (typeof e.error_description === 'string' && e.error_description.trim() && e.error_description.trim() !== '[object Object]') {
+      return e.error_description.trim();
+    }
+
+    if (e.error && typeof e.error === 'object') {
+      const nested = e.error as Record<string, unknown>;
+      if (typeof nested.message === 'string' && nested.message.trim() && nested.message.trim() !== '[object Object]') {
+        return nested.message.trim();
+      }
+      if (typeof nested.error === 'string' && nested.error.trim() && nested.error.trim() !== '[object Object]') {
+        return nested.error.trim();
+      }
+    }
+
+    if (e.data && typeof e.data === 'object') {
+      const nestedData = e.data as Record<string, unknown>;
+      if (typeof nestedData.message === 'string' && nestedData.message.trim() && nestedData.message.trim() !== '[object Object]') {
+        return nestedData.message.trim();
+      }
+      if (typeof nestedData.error === 'string' && nestedData.error.trim() && nestedData.error.trim() !== '[object Object]') {
+        return nestedData.error.trim();
+      }
+    }
+
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== '{}' && serialized !== '[]') {
+        return serialized;
+      }
+    } catch {
+      return 'Unknown error';
+    }
+  }
+
+  return 'Unknown error';
+}
+
+// --------------------------------------------------
 // DEFENSIVE PUBLIC URL EXTRACTOR
 // Prevents [object Object] across all upload and media response formats
 // --------------------------------------------------
@@ -195,20 +266,26 @@ async function apiAdminSave<T>(table: string, item: any): Promise<T> {
   });
 
   const resText = await res.text();
-  let data: any = {};
+  let payload: any = null;
   try {
-    data = JSON.parse(resText);
+    payload = resText ? JSON.parse(resText) : null;
   } catch {
-    throw new Error(`Server returned invalid response (HTTP ${res.status}): ${resText.substring(0, 120)}`);
+    payload = resText;
   }
 
-  if (!res.ok || !data.success || !data.data) {
-    const errorMsg = data.error || `Save failed with HTTP ${res.status}`;
+  if (!res.ok) {
+    const errorMsg = getErrorMessage(payload) || `HTTP ${res.status}`;
+    console.error(`[Admin Save HTTP Error] Table: ${table} Status: ${res.status}`, errorMsg);
+    throw new Error(errorMsg.startsWith('Save failed') ? errorMsg : `Save failed: ${errorMsg}`);
+  }
+
+  if (!payload || !payload.success || !payload.data) {
+    const errorMsg = getErrorMessage(payload) || `Invalid server response`;
     console.error(`[Admin Save Failed] Table: ${table}`, errorMsg);
-    throw new Error(errorMsg);
+    throw new Error(errorMsg.startsWith('Save failed') ? errorMsg : `Save failed: ${errorMsg}`);
   }
 
-  return data.data as T;
+  return payload.data as T;
 }
 
 async function apiAdminDelete(table: string, id: string): Promise<void> {
@@ -231,17 +308,23 @@ async function apiAdminDelete(table: string, id: string): Promise<void> {
   });
 
   const resText = await res.text();
-  let data: any = {};
+  let payload: any = null;
   try {
-    data = JSON.parse(resText);
+    payload = resText ? JSON.parse(resText) : null;
   } catch {
-    throw new Error(`Server returned invalid response (HTTP ${res.status}): ${resText.substring(0, 120)}`);
+    payload = resText;
   }
 
-  if (!res.ok || !data.success) {
-    const errorMsg = data.error || `Delete failed with HTTP ${res.status}`;
+  if (!res.ok) {
+    const errorMsg = getErrorMessage(payload) || `HTTP ${res.status}`;
+    console.error(`[Admin Delete HTTP Error] Table: ${table}, ID: ${id}, Status: ${res.status}`, errorMsg);
+    throw new Error(errorMsg.startsWith('Delete failed') ? errorMsg : `Delete failed: ${errorMsg}`);
+  }
+
+  if (!payload || !payload.success) {
+    const errorMsg = getErrorMessage(payload) || `Invalid server response`;
     console.error(`[Admin Delete Failed] Table: ${table}, ID: ${id}`, errorMsg);
-    throw new Error(errorMsg);
+    throw new Error(errorMsg.startsWith('Delete failed') ? errorMsg : `Delete failed: ${errorMsg}`);
   }
 }
 
@@ -967,21 +1050,27 @@ export const repository = {
     });
 
     const responseText = await response.text();
-    let data: any = {};
+    let payload: any = null;
     try {
-      data = JSON.parse(responseText);
+      payload = responseText ? JSON.parse(responseText) : null;
     } catch {
-      throw new Error(`Server upload endpoint returned invalid response (HTTP ${response.status}): ${responseText.substring(0, 120)}`);
+      payload = responseText;
     }
 
-    if (!response.ok || !data.success) {
-      const errorMsg = data.error || `Server upload failed with HTTP ${response.status}`;
+    if (!response.ok) {
+      const errorMsg = getErrorMessage(payload) || `HTTP ${response.status}`;
+      console.error('[Upload HTTP Error]', errorMsg);
+      throw new Error(errorMsg.startsWith('Upload failed') ? errorMsg : `Upload failed: ${errorMsg}`);
+    }
+
+    if (!payload || !payload.success) {
+      const errorMsg = getErrorMessage(payload) || `Invalid server response`;
       console.error('[Upload Failed]', errorMsg);
-      throw new Error(errorMsg);
+      throw new Error(errorMsg.startsWith('Upload failed') ? errorMsg : `Upload failed: ${errorMsg}`);
     }
 
-    const extractedUrl = extractPublicUrl(data);
-    console.log(`[Upload Success] URL: "${extractedUrl}", Path: "${data.path || ''}"`);
+    const extractedUrl = extractPublicUrl(payload);
+    console.log(`[Upload Success] URL: "${extractedUrl}", Path: "${payload.path || ''}"`);
     return extractedUrl;
   },
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Star, Plus, Edit3, Trash2, Save, X, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { Review } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminReviewsPageProps {
@@ -25,6 +25,7 @@ export const AdminReviewsPage: React.FC<AdminReviewsPageProps> = ({ reviews = []
   });
 
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -43,23 +44,27 @@ export const AdminReviewsPage: React.FC<AdminReviewsPageProps> = ({ reviews = []
     });
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (rev: Review) => {
     setFormData(rev);
     setEditingId(rev.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.client_name || !formData.review_text) return;
     setSaving(true);
+    setSaveError(null);
 
     try {
       await repository.saveReview({
@@ -76,8 +81,9 @@ export const AdminReviewsPage: React.FC<AdminReviewsPageProps> = ({ reviews = []
       });
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving review:', err);
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -93,7 +99,7 @@ export const AdminReviewsPage: React.FC<AdminReviewsPageProps> = ({ reviews = []
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete review:', err);
-      setDeleteError(err.message || 'Failed to delete review.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
@@ -228,6 +234,13 @@ export const AdminReviewsPage: React.FC<AdminReviewsPageProps> = ({ reviews = []
               Publish on public website
             </label>
           </div>
+
+          {saveError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
             <button

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Code2, Plus, Trash2, Edit3, Save, X, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Skill } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminSkillsPageProps {
@@ -74,7 +74,7 @@ export const AdminSkillsPage: React.FC<AdminSkillsPageProps> = ({ skills = [], o
       handleCancel();
     } catch (err: any) {
       console.error('Error saving skill:', err);
-      setSaveError(err.message || 'Failed to save skill.');
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -90,7 +90,7 @@ export const AdminSkillsPage: React.FC<AdminSkillsPageProps> = ({ skills = [], o
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete skill:', err);
-      setDeleteError(err.message || 'Failed to delete skill.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }

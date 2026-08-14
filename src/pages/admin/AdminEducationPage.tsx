@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GraduationCap, Plus, Edit3, Trash2, Save, X, AlertCircle } from 'lucide-react';
 import { Education } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminEducationPageProps {
@@ -29,6 +29,7 @@ export const AdminEducationPage: React.FC<AdminEducationPageProps> = ({
   });
 
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -48,23 +49,27 @@ export const AdminEducationPage: React.FC<AdminEducationPageProps> = ({
     });
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (edu: Education) => {
     setFormData(edu);
     setEditingId(edu.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.institution || !formData.degree) return;
     setSaving(true);
+    setSaveError(null);
 
     try {
       await repository.saveEducation({
@@ -82,8 +87,9 @@ export const AdminEducationPage: React.FC<AdminEducationPageProps> = ({
       });
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving education:', err);
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -99,7 +105,7 @@ export const AdminEducationPage: React.FC<AdminEducationPageProps> = ({
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete education:', err);
-      setDeleteError(err.message || 'Failed to delete education entry.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
@@ -222,6 +228,13 @@ export const AdminEducationPage: React.FC<AdminEducationPageProps> = ({
               />
             </div>
           </div>
+
+          {saveError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
             <button

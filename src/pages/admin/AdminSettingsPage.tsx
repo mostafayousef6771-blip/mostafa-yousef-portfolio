@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Save, Check, Globe, Search, BarChart3, Image as ImageIcon } from 'lucide-react';
+import { Settings, Save, Check, Globe, Search, BarChart3, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { SiteSettings } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 
 interface AdminSettingsPageProps {
   onRefresh?: () => void;
@@ -11,6 +11,7 @@ export const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({ onRefresh 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<SiteSettings>({
     site_title: 'Mostafa Portfolio',
@@ -44,14 +45,15 @@ export const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({ onRefresh 
     e.preventDefault();
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
     try {
       await repository.updateSettings(settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       if (onRefresh) onRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating settings:', err);
-      alert('Failed to save settings. Please try again.');
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -80,6 +82,13 @@ export const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({ onRefresh 
           </p>
         </div>
       </div>
+
+      {saveError && (
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
 
       {/* Form */}
       <form onSubmit={handleSave} className="space-y-6">

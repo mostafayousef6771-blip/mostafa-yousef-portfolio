@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Info, Save, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import { About } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 
 interface AdminAboutPageProps {
   about: About | null;
@@ -19,6 +19,7 @@ export const AdminAboutPage: React.FC<AdminAboutPageProps> = ({ about = null, on
   const [newHighlight, setNewHighlight] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (about) {
@@ -47,13 +48,15 @@ export const AdminAboutPage: React.FC<AdminAboutPageProps> = ({ about = null, on
     e.preventDefault();
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
     try {
       await repository.updateAbout(formData);
       setSaved(true);
       onRefresh();
       setTimeout(() => setSaved(false), 4000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving about page:', err);
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -79,6 +82,12 @@ export const AdminAboutPage: React.FC<AdminAboutPageProps> = ({ about = null, on
           </div>
         )}
       </div>
+
+      {saveError && (
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+          <span>⚠️ {saveError}</span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-xl space-y-5">

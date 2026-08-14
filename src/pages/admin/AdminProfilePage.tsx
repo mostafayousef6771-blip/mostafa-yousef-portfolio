@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Save, CheckCircle2, Image, Sparkles, Upload, Loader2 } from 'lucide-react';
 import { Profile } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 
 interface AdminProfilePageProps {
   profile: Profile | null;
@@ -54,7 +54,8 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
       const finalUrl = await repository.uploadFile(file, 'profile');
       setFormData((prev) => ({ ...prev, avatar_url: finalUrl }));
     } catch (err: any) {
-      setUploadError(err.message || 'Avatar upload failed. Please try again.');
+      console.error('Avatar upload error:', err);
+      setUploadError(getErrorMessage(err));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -73,7 +74,7 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({ profile = nu
       setTimeout(() => setSaved(false), 4000);
     } catch (err: any) {
       console.error('Error saving profile:', err);
-      setSaveError(err.message || 'Failed to save profile. Please check permissions.');
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }

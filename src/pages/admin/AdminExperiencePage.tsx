@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Briefcase, Plus, Edit3, Trash2, Save, X, AlertCircle } from 'lucide-react';
 import { Experience } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminExperiencePageProps {
@@ -30,6 +30,7 @@ export const AdminExperiencePage: React.FC<AdminExperiencePageProps> = ({
   const [descInput, setDescInput] = useState('');
   const [skillsInput, setSkillsInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -50,6 +51,7 @@ export const AdminExperiencePage: React.FC<AdminExperiencePageProps> = ({
     setSkillsInput('');
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (exp: Experience) => {
@@ -58,17 +60,20 @@ export const AdminExperiencePage: React.FC<AdminExperiencePageProps> = ({
     setSkillsInput((exp.skills_used || []).join(', '));
     setEditingId(exp.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.company || !formData.position) return;
     setSaving(true);
+    setSaveError(null);
 
     const parsedDesc = descInput
       .split('\n')
@@ -95,8 +100,9 @@ export const AdminExperiencePage: React.FC<AdminExperiencePageProps> = ({
       });
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving experience:', err);
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -112,7 +118,7 @@ export const AdminExperiencePage: React.FC<AdminExperiencePageProps> = ({
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete experience:', err);
-      setDeleteError(err.message || 'Failed to delete experience record.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
@@ -247,6 +253,13 @@ export const AdminExperiencePage: React.FC<AdminExperiencePageProps> = ({
               className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
             />
           </div>
+
+          {saveError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
             <button

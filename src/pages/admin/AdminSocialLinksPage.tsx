@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Share2, Plus, Edit3, Trash2, Save, X, Globe, AlertCircle } from 'lucide-react';
 import { SocialLink } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminSocialLinksPageProps {
@@ -25,6 +25,7 @@ export const AdminSocialLinksPage: React.FC<AdminSocialLinksPageProps> = ({
   });
 
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -40,23 +41,27 @@ export const AdminSocialLinksPage: React.FC<AdminSocialLinksPageProps> = ({
     });
     setEditingId('new');
     setIsNew(true);
+    setSaveError(null);
   };
 
   const handleEdit = (link: SocialLink) => {
     setFormData(link);
     setEditingId(link.id);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setIsNew(false);
+    setSaveError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.platform || !formData.url) return;
     setSaving(true);
+    setSaveError(null);
 
     try {
       await repository.saveSocialLink({
@@ -70,8 +75,9 @@ export const AdminSocialLinksPage: React.FC<AdminSocialLinksPageProps> = ({
       });
       onRefresh();
       handleCancel();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving social link:', err);
+      setSaveError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -87,7 +93,7 @@ export const AdminSocialLinksPage: React.FC<AdminSocialLinksPageProps> = ({
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete social link:', err);
-      setDeleteError(err.message || 'Failed to delete social link.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
@@ -175,6 +181,13 @@ export const AdminSocialLinksPage: React.FC<AdminSocialLinksPageProps> = ({
               Enable link on website footer and contact page
             </label>
           </div>
+
+          {saveError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
             <button

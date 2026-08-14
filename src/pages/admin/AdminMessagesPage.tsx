@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Inbox, Mail, Trash2, CheckCircle2, Circle, Calendar, User, Search, AlertCircle } from 'lucide-react';
 import { ContactMessage } from '../../types/portfolio';
-import { repository } from '../../lib/repository';
+import { repository, getErrorMessage } from '../../lib/repository';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface AdminMessagesPageProps {
@@ -47,7 +47,7 @@ export const AdminMessagesPage: React.FC<AdminMessagesPageProps> = ({ messages =
       onRefresh();
     } catch (err: any) {
       console.error('Failed to delete message:', err);
-      setDeleteError(err.message || 'Failed to delete message.');
+      setDeleteError(getErrorMessage(err));
     } finally {
       setIsDeleting(false);
     }
