@@ -41,12 +41,16 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
     return { authenticated: false, isAdmin: false, error: 'Server configuration error: Supabase URL is not configured.' };
   }
 
+  if (!adminClient && !serviceKey) {
+    return { authenticated: false, isAdmin: false, error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.' };
+  }
+
   // Direct service role key authorization
   if (serviceKey && token === serviceKey) {
     return { authenticated: true, isAdmin: true, userId: 'service_role', client: adminClient };
   }
 
-  // 1. If service role client is available, verify token and check admin status
+  // Verify token using adminClient (service role)
   if (adminClient) {
     const { data: userData, error: authError } = await adminClient.auth.getUser(token);
     if (authError || !userData?.user) {
@@ -58,65 +62,37 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
     }
 
     if (targetAnon) {
-      const userClient = createClient(targetUrl, targetAnon, {
-        global: {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      });
+      try {
+        const userClient = createClient(targetUrl, targetAnon, {
+          global: {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        });
 
-      const { data: isAdminRes, error: rpcErr } = await userClient.rpc('is_admin');
-      if (rpcErr) {
-        console.warn('[verifyAdminToken] is_admin RPC notice:', rpcErr.message);
-      }
-
-      if (isAdminRes === false) {
-        return {
-          authenticated: true,
-          isAdmin: false,
-          userId: userData.user.id,
-          error: 'Forbidden: You do not have administrator permissions.',
-        };
+        const { data: isAdminRes, error: rpcErr } = await userClient.rpc('is_admin');
+        if (rpcErr) {
+          console.warn('[verifyAdminToken] is_admin RPC notice:', rpcErr.message);
+        } else if (isAdminRes === false) {
+          return {
+            authenticated: true,
+            isAdmin: false,
+            userId: userData.user.id,
+            error: 'Forbidden: You do not have administrator permissions.',
+          };
+        }
+      } catch (err: any) {
+        console.warn('[verifyAdminToken] is_admin check exception:', err?.message);
       }
     }
 
     return { authenticated: true, isAdmin: true, userId: userData.user.id, client: adminClient };
   }
 
-  // 2. If service role is not configured, authenticate using userClient with anonKey and user's Bearer JWT
-  if (!targetAnon) {
-    return { authenticated: false, isAdmin: false, error: 'Server configuration error: Supabase configuration keys are missing.' };
-  }
-
-  const userClient = createClient(targetUrl, targetAnon, {
-    global: {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  });
-
-  const { data: userData, error: authError } = await userClient.auth.getUser(token);
-  if (authError || !userData?.user) {
-    return {
-      authenticated: false,
-      isAdmin: false,
-      error: `Unauthorized: Invalid or expired admin session (${authError?.message || 'User not found'}). Please log in again.`,
-    };
-  }
-
-  const { data: isAdminRes, error: rpcErr } = await userClient.rpc('is_admin');
-  if (rpcErr) {
-    console.warn('[verifyAdminToken] is_admin RPC notice:', rpcErr.message);
-  }
-
-  if (isAdminRes === false) {
-    return {
-      authenticated: true,
-      isAdmin: false,
-      userId: userData.user.id,
-      error: 'Forbidden: You do not have administrator permissions.',
-    };
-  }
-
-  return { authenticated: true, isAdmin: true, userId: userData.user.id, client: userClient };
+  return {
+    authenticated: false,
+    isAdmin: false,
+    error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+  };
 }
 
 export function createApiApp(): express.Express {
@@ -143,13 +119,15 @@ export function createApiApp(): express.Express {
     res.setHeader('Content-Type', 'application/json');
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
     const isConfigured = Boolean(supabaseUrl) && !supabaseUrl.includes('your-supabase-project');
+    const hasAdminKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
     return res.status(200).json({
       success: true,
       service: 'api',
       status: 'ok',
       timestamp: new Date().toISOString(),
       supabaseConfigured: isConfigured,
-      hasAdminKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY),
+      hasAdminKey,
+      ...(!hasAdminKey ? { warning: 'SUPABASE_SERVICE_ROLE_KEY is missing' } : {}),
     });
   });
 
@@ -265,7 +243,10 @@ export function createApiApp(): express.Express {
 
       const clientToUse = auth.client || getSupabaseAdmin();
       if (!clientToUse) {
-        return res.status(500).json({ success: false, error: 'Supabase client is not initialized on server.' });
+        return res.status(500).json({
+          success: false,
+          error: 'SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+        });
       }
 
       const { table, item } = req.body || {};
@@ -282,22 +263,50 @@ export function createApiApp(): express.Express {
         return res.status(400).json({ success: false, error: `Invalid table name "${table}".` });
       }
 
-      const { data, error } = await clientToUse
-        .from(table.toLowerCase())
-        .upsert(item)
-        .select()
-        .single();
-
-      if (error) {
-        console.error(`[Admin Save Error] Table: ${table}`, error);
-        return res.status(400).json({ success: false, error: `Save failed: ${error.message}` });
+      // Clean item of undefined values
+      const cleanItem: Record<string, any> = {};
+      for (const [key, value] of Object.entries(item)) {
+        if (value !== undefined) {
+          cleanItem[key] = value;
+        }
       }
 
-      console.log(`[Admin Save Success] Table: ${table}, Item ID: ${data?.id}`);
-      return res.status(200).json({ success: true, data });
+      const { data, error } = await clientToUse
+        .from(table.toLowerCase())
+        .upsert(cleanItem)
+        .select();
+
+      if (error) {
+        console.error(`[Admin Save Error] Table: ${table}`, {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Save failed: ${error.message}`,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+      }
+
+      const savedResult = Array.isArray(data) ? data[0] : data;
+      console.log(`[Admin Save Success] Table: ${table}, Item ID: ${savedResult?.id || 'record'}`);
+      return res.status(200).json({ success: true, data: savedResult });
     } catch (err: any) {
-      console.error('[Admin Save Exception]', err);
-      return res.status(500).json({ success: false, error: err.message || 'Internal server error during save.' });
+      console.error('[Admin Save Exception]', {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+      });
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Internal server error during save.',
+        code: err?.code,
+        details: err?.details,
+      });
     }
   });
 
@@ -315,7 +324,10 @@ export function createApiApp(): express.Express {
 
       const clientToUse = auth.client || getSupabaseAdmin();
       if (!clientToUse) {
-        return res.status(500).json({ success: false, error: 'Supabase client is not initialized on server.' });
+        return res.status(500).json({
+          success: false,
+          error: 'SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+        });
       }
 
       const { table, id } = req.body || {};
@@ -338,15 +350,35 @@ export function createApiApp(): express.Express {
         .eq('id', id);
 
       if (error) {
-        console.error(`[Admin Delete Error] Table: ${table}, ID: ${id}`, error);
-        return res.status(400).json({ success: false, error: `Delete failed: ${error.message}` });
+        console.error(`[Admin Delete Error] Table: ${table}, ID: ${id}`, {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+        return res.status(400).json({
+          success: false,
+          error: `Delete failed: ${error.message}`,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
       }
 
       console.log(`[Admin Delete Success] Table: ${table}, ID: ${id}`);
       return res.status(200).json({ success: true });
     } catch (err: any) {
-      console.error('[Admin Delete Exception]', err);
-      return res.status(500).json({ success: false, error: err.message || 'Internal server error during delete.' });
+      console.error('[Admin Delete Exception]', {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+      });
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Internal server error during delete.',
+        code: err?.code,
+        details: err?.details,
+      });
     }
   });
 
@@ -413,7 +445,10 @@ export function createApiApp(): express.Express {
 
         const clientToUse = auth.client || getSupabaseAdmin();
         if (!clientToUse) {
-          return res.status(500).json({ success: false, error: 'Supabase storage service is not configured on the server.' });
+          return res.status(500).json({
+            success: false,
+            error: 'SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+          });
         }
 
         const bucket = safeBucket;
@@ -440,17 +475,17 @@ export function createApiApp(): express.Express {
         });
 
         if (uploadErr) {
-          console.error('[Upload Request Info]', {
-            method: req.method,
-            path: req.path || req.originalUrl,
-            authenticated: true,
+          console.error('[Storage Upload Error]', {
+            message: uploadErr.message,
             bucket,
-            filename: safeFilename,
-            uploadSuccess: false,
-            status: 400,
-            error: uploadErr.message,
+            filePath,
           });
-          return res.status(400).json({ success: false, error: `Storage upload failed: ${uploadErr.message || 'Unknown storage error'}` });
+          return res.status(400).json({
+            success: false,
+            error: `Storage upload failed: ${uploadErr.message || 'Unknown storage error'}`,
+            code: (uploadErr as any).statusCode || (uploadErr as any).code,
+            details: (uploadErr as any).error || uploadErr.message,
+          });
         }
 
         const uploadedStoragePath = uploadData?.path || filePath;
@@ -518,8 +553,17 @@ export function createApiApp(): express.Express {
           type: file.mimetype,
         });
       } catch (err: any) {
-        console.error('[Upload Endpoint Exception]', err);
-        return res.status(500).json({ success: false, error: err.message || 'Internal server error during upload.' });
+        console.error('[Upload Endpoint Exception]', {
+          message: err?.message,
+          code: err?.code,
+          details: err?.details,
+        });
+        return res.status(500).json({
+          success: false,
+          error: err?.message || 'Internal server error during upload.',
+          code: err?.code,
+          details: err?.details,
+        });
       }
     });
   };
@@ -546,17 +590,30 @@ export function createApiApp(): express.Express {
 
       const clientToUse = auth.client || getSupabaseAdmin();
       if (!clientToUse) {
-        return res.status(500).json({ success: false, error: 'Supabase storage is not configured on the server.' });
+        return res.status(500).json({
+          success: false,
+          error: 'SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+        });
       }
 
       const { data, error } = await clientToUse.storage.from(bucket).remove([filePath]);
       if (error) {
-        return res.status(400).json({ success: false, error: `Delete failed: ${error.message}` });
+        return res.status(400).json({
+          success: false,
+          error: `Delete failed: ${error.message}`,
+          code: (error as any).statusCode || (error as any).code,
+          details: (error as any).error || error.message,
+        });
       }
 
       return res.status(200).json({ success: true, deleted: data });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message || 'Internal server error during delete.' });
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Internal server error during delete.',
+        code: err?.code,
+        details: err?.details,
+      });
     }
   });
 
@@ -625,8 +682,9 @@ export function createApiApp(): express.Express {
     });
   });
 
-  // MOUNT API ROUTER Strictly at /api
+  // MOUNT API ROUTER at both /api and root (for maximum compatibility with Vercel and standalone servers)
   app.use('/api', apiRouter);
+  app.use(apiRouter);
 
   // SEO ROBOTS.TXT
   app.get('/robots.txt', (_req, res) => {

@@ -12,29 +12,45 @@ export const config = {
 };
 
 export default function handler(req: any, res: any) {
-  // Normalize incoming request path from Vercel's rewrite headers
-  const matchedPath =
-    (req.headers['x-matched-path'] as string) ||
-    (req.headers['x-vercel-matched-path'] as string) ||
-    (req.headers['x-forwarded-uri'] as string) ||
-    (req.headers['x-original-uri'] as string) ||
-    '';
+  try {
+    // 1. Get raw request URL
+    const originalUrl = req.url || '';
+    const queryIndex = originalUrl.indexOf('?');
+    const queryString = queryIndex !== -1 ? originalUrl.substring(queryIndex) : '';
+    const pathname = queryIndex !== -1 ? originalUrl.substring(0, queryIndex) : originalUrl;
 
-  const queryIndex = (req.url || '').indexOf('?');
-  const queryString = queryIndex !== -1 ? req.url.substring(queryIndex) : '';
+    // 2. Safe normalization: strip /api/index if present
+    let cleanPath = pathname.replace(/^\/api\/index(\.ts|\.js)?/, '/api');
 
-  if (matchedPath && matchedPath.startsWith('/api')) {
-    req.url = matchedPath.split('?')[0] + queryString;
-  } else if (req.url) {
-    let cleanUrl = req.url.replace(/^\/api\/index(\.ts|\.js)?/, '/api');
-    if (!cleanUrl.startsWith('/api') && !cleanUrl.startsWith('/robots.txt') && !cleanUrl.startsWith('/sitemap.xml')) {
-      cleanUrl = '/api' + (cleanUrl.startsWith('/') ? cleanUrl : '/' + cleanUrl);
+    // 3. Check x-forwarded-uri or x-original-uri only if clean
+    const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-original-uri']) as string | undefined;
+    if (forwardedUri && typeof forwardedUri === 'string' && forwardedUri.startsWith('/api') && !forwardedUri.includes('(')) {
+      cleanPath = forwardedUri.split('?')[0];
     }
-    req.url = cleanUrl;
-  }
 
-  return app(req, res);
+    // 4. Ensure path starts with /api for API endpoints
+    if (!cleanPath.startsWith('/api') && !cleanPath.startsWith('/robots.txt') && !cleanPath.startsWith('/sitemap.xml')) {
+      cleanPath = '/api' + (cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
+    }
+
+    req.url = cleanPath + queryString;
+
+    // Execute Express app
+    return app(req, res);
+  } catch (err: any) {
+    console.error('[Vercel Serverless Handler Exception]', err);
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json({
+        success: false,
+        error: `Server handler exception: ${err?.message || 'Internal server error'}`,
+        code: err?.code,
+        details: err?.details,
+      });
+    }
+  }
 }
+
 
 
 
