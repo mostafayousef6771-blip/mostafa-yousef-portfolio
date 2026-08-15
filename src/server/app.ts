@@ -682,9 +682,8 @@ export function createApiApp(): express.Express {
     });
   });
 
-  // MOUNT API ROUTER at both /api and root (for maximum compatibility with Vercel and standalone servers)
+  // MOUNT API ROUTER Strictly at /api
   app.use('/api', apiRouter);
-  app.use(apiRouter);
 
   // SEO ROBOTS.TXT
   app.get('/robots.txt', (_req, res) => {
