@@ -11,8 +11,17 @@ const upload = multer({
 });
 
 export function getSupabaseAdmin(): SupabaseClient | null {
-  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '';
+  let url = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+  let serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+  // Strip wrapping quotes if any
+  if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
+    url = url.slice(1, -1).trim();
+  }
+  if ((serviceKey.startsWith('"') && serviceKey.endsWith('"')) || (serviceKey.startsWith("'") && serviceKey.endsWith("'"))) {
+    serviceKey = serviceKey.slice(1, -1).trim();
+  }
+
   if (url && serviceKey && !url.includes('your-supabase-project')) {
     return createClient(url, serviceKey, {
       auth: {
@@ -32,9 +41,20 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
     return { authenticated: false, isAdmin: false, error: 'Unauthorized: Admin authentication token is required.' };
   }
 
-  const targetUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-  const targetAnon = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '';
+  let targetUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+  let targetAnon = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  let serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+  if ((targetUrl.startsWith('"') && targetUrl.endsWith('"')) || (targetUrl.startsWith("'") && targetUrl.endsWith("'"))) {
+    targetUrl = targetUrl.slice(1, -1).trim();
+  }
+  if ((targetAnon.startsWith('"') && targetAnon.endsWith('"')) || (targetAnon.startsWith("'") && targetAnon.endsWith("'"))) {
+    targetAnon = targetAnon.slice(1, -1).trim();
+  }
+  if ((serviceKey.startsWith('"') && serviceKey.endsWith('"')) || (serviceKey.startsWith("'") && serviceKey.endsWith("'"))) {
+    serviceKey = serviceKey.slice(1, -1).trim();
+  }
+
   const adminClient = getSupabaseAdmin();
 
   if (!targetUrl) {
@@ -44,6 +64,7 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
   if (!adminClient && !serviceKey) {
     return { authenticated: false, isAdmin: false, error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.' };
   }
+
 
   // Direct service role key authorization
   if (serviceKey && token === serviceKey) {
@@ -98,7 +119,29 @@ export async function verifyAdminToken(req: express.Request): Promise<{ authenti
 export function createApiApp(): express.Express {
   const app = express();
 
-  app.use(express.json());
+  // Robust Body Parser supporting standalone Express and Vercel Serverless environments
+  app.use((req, res, next) => {
+    // If body was already parsed by Vercel serverless runtime or upstream middleware
+    if (req.body !== undefined && typeof req.body === 'object' && req.body !== null) {
+      (req as any)._body = true;
+      return next();
+    }
+    // If body is already a JSON string
+    if (typeof req.body === 'string') {
+      try {
+        req.body = JSON.parse(req.body);
+        (req as any)._body = true;
+        return next();
+      } catch {}
+    }
+    // If request is multipart/form-data, skip to let Multer handle streaming
+    const contentType = req.headers['content-type'] || '';
+    if (typeof contentType === 'string' && contentType.includes('multipart/form-data')) {
+      return next();
+    }
+    // Standard Express JSON body parsing
+    express.json({ limit: '10mb' })(req, res, next);
+  });
 
   // STRICT API ROUTER
   const apiRouter = express.Router();
