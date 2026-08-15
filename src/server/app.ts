@@ -232,26 +232,73 @@ export function createApiApp(): express.Express {
   // SECURE ADMIN SAVE (CREATE / UPDATE) ROUTE
   apiRouter.post('/admin/save', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
+    const hasAuthHeader = Boolean(req.headers.authorization);
+    const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
+
     try {
       const auth = await verifyAdminToken(req);
       if (!auth.authenticated) {
-        return res.status(401).json({ success: false, error: auth.error || 'Unauthorized request.' });
+        console.warn('[Admin Save Request]', {
+          endpoint: '/api/admin/save',
+          method: req.method,
+          requestPath: req.originalUrl || req.path,
+          hasAuthHeader,
+          tokenVerificationSucceeded: false,
+          hasServiceRoleKey,
+          status: 401,
+          error: auth.error,
+        });
+        return res.status(401).json({
+          success: false,
+          error: auth.error || 'Unauthorized request.',
+          code: 'UNAUTHORIZED',
+        });
       }
       if (!auth.isAdmin) {
-        return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
+        console.warn('[Admin Save Request]', {
+          endpoint: '/api/admin/save',
+          method: req.method,
+          requestPath: req.originalUrl || req.path,
+          hasAuthHeader,
+          tokenVerificationSucceeded: true,
+          isAdmin: false,
+          hasServiceRoleKey,
+          status: 403,
+          error: auth.error,
+        });
+        return res.status(403).json({
+          success: false,
+          error: auth.error || 'Forbidden: Administrator privileges required.',
+          code: 'FORBIDDEN',
+        });
       }
 
       const clientToUse = auth.client || getSupabaseAdmin();
       if (!clientToUse) {
+        console.error('[Admin Save Request]', {
+          endpoint: '/api/admin/save',
+          method: req.method,
+          requestPath: req.originalUrl || req.path,
+          hasAuthHeader,
+          tokenVerificationSucceeded: true,
+          hasServiceRoleKey: false,
+          status: 500,
+          error: 'SUPABASE_SERVICE_ROLE_KEY is missing.',
+        });
         return res.status(500).json({
           success: false,
-          error: 'SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+          error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+          code: 'MISSING_SERVICE_ROLE_KEY',
         });
       }
 
       const { table, item } = req.body || {};
       if (!table || !item) {
-        return res.status(400).json({ success: false, error: 'Table and item parameters are required.' });
+        return res.status(400).json({
+          success: false,
+          error: 'Table and item parameters are required.',
+          code: 'INVALID_PARAMETERS',
+        });
       }
 
       const allowedTables = [
@@ -260,7 +307,11 @@ export function createApiApp(): express.Express {
         'about', 'site_settings', 'media'
       ];
       if (!allowedTables.includes(table.toLowerCase())) {
-        return res.status(400).json({ success: false, error: `Invalid table name "${table}".` });
+        return res.status(400).json({
+          success: false,
+          error: `Invalid table name "${table}".`,
+          code: 'INVALID_TABLE',
+        });
       }
 
       // Clean item of undefined values
@@ -277,11 +328,19 @@ export function createApiApp(): express.Express {
         .select();
 
       if (error) {
-        console.error(`[Admin Save Error] Table: ${table}`, {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
+        console.error('[Admin Save Supabase Error]', {
+          endpoint: '/api/admin/save',
+          method: req.method,
+          requestPath: req.originalUrl || req.path,
+          status: 400,
+          hasAuthHeader,
+          tokenVerificationSucceeded: true,
+          hasServiceRoleKey,
+          operation: `upsert into ${table.toLowerCase()}`,
+          errorCode: error.code,
+          errorMessage: error.message,
+          errorDetails: error.details,
+          errorHint: error.hint,
         });
         return res.status(400).json({
           success: false,
@@ -293,13 +352,29 @@ export function createApiApp(): express.Express {
       }
 
       const savedResult = Array.isArray(data) ? data[0] : data;
-      console.log(`[Admin Save Success] Table: ${table}, Item ID: ${savedResult?.id || 'record'}`);
+      console.log('[Admin Save Request]', {
+        endpoint: '/api/admin/save',
+        method: req.method,
+        requestPath: req.originalUrl || req.path,
+        status: 200,
+        hasAuthHeader,
+        tokenVerificationSucceeded: true,
+        hasServiceRoleKey,
+        operation: `upsert into ${table.toLowerCase()}`,
+        itemId: savedResult?.id || 'record',
+      });
       return res.status(200).json({ success: true, data: savedResult });
     } catch (err: any) {
       console.error('[Admin Save Exception]', {
-        message: err?.message,
-        code: err?.code,
-        details: err?.details,
+        endpoint: '/api/admin/save',
+        method: req.method,
+        requestPath: req.originalUrl || req.path,
+        status: 500,
+        hasAuthHeader,
+        hasServiceRoleKey,
+        errorMessage: err?.message,
+        errorCode: err?.code,
+        errorDetails: err?.details,
       });
       return res.status(500).json({
         success: false,
@@ -385,15 +460,25 @@ export function createApiApp(): express.Express {
   // SECURE FILE UPLOAD ROUTE
   const handleUpload = (req: express.Request, res: express.Response) => {
     res.setHeader('Content-Type', 'application/json');
+    const hasAuthHeader = Boolean(req.headers.authorization);
+    const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
 
     upload.single('file')(req, res, async (multerErr: any) => {
       if (multerErr) {
-        console.error('[Multer Processing Error]', multerErr);
+        console.error('[Upload Request Info]', {
+          endpoint: '/api/upload',
+          method: req.method,
+          requestPath: req.originalUrl || req.path,
+          status: 400,
+          hasAuthHeader,
+          hasServiceRoleKey,
+          error: multerErr.message,
+        });
         if (multerErr instanceof multer.MulterError) {
           if (multerErr.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({ success: false, error: 'File size exceeds limit of 15MB.' });
+            return res.status(400).json({ success: false, error: 'File size exceeds limit of 15MB.', code: 'LIMIT_FILE_SIZE' });
           }
-          return res.status(400).json({ success: false, error: `Upload request error: ${multerErr.message}` });
+          return res.status(400).json({ success: false, error: `Upload request error: ${multerErr.message}`, code: multerErr.code });
         }
         return res.status(400).json({ success: false, error: multerErr.message || 'Error processing uploaded file.' });
       }
@@ -405,56 +490,79 @@ export function createApiApp(): express.Express {
         const file = req.file;
         if (!file) {
           console.warn('[Upload Request Info]', {
+            endpoint: '/api/upload',
             method: req.method,
-            path: req.path || req.originalUrl,
-            authenticated: false,
+            requestPath: req.originalUrl || req.path,
+            hasAuthHeader,
+            hasServiceRoleKey,
             bucket: safeBucket,
             filename: 'none',
             status: 400,
-            result: 'no_file',
+            error: 'No file provided in request.',
           });
-          return res.status(400).json({ success: false, error: 'No file provided in request.' });
+          return res.status(400).json({ success: false, error: 'No file provided in request.', code: 'NO_FILE' });
         }
 
         const auth = await verifyAdminToken(req);
         if (!auth.authenticated) {
           console.warn('[Upload Request Info]', {
+            endpoint: '/api/upload',
             method: req.method,
-            path: req.path || req.originalUrl,
-            authenticated: false,
+            requestPath: req.originalUrl || req.path,
+            hasAuthHeader,
+            tokenVerificationSucceeded: false,
+            hasServiceRoleKey,
             bucket: safeBucket,
             filename: safeFilename,
             status: 401,
-            result: 'unauthorized',
+            error: auth.error,
           });
-          return res.status(401).json({ success: false, error: auth.error || 'Unauthorized request.' });
+          return res.status(401).json({ success: false, error: auth.error || 'Unauthorized request.', code: 'UNAUTHORIZED' });
         }
         if (!auth.isAdmin) {
           console.warn('[Upload Request Info]', {
+            endpoint: '/api/upload',
             method: req.method,
-            path: req.path || req.originalUrl,
-            authenticated: true,
+            requestPath: req.originalUrl || req.path,
+            hasAuthHeader,
+            tokenVerificationSucceeded: true,
             isAdmin: false,
+            hasServiceRoleKey,
             bucket: safeBucket,
             filename: safeFilename,
             status: 403,
-            result: 'forbidden',
+            error: auth.error,
           });
-          return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.' });
+          return res.status(403).json({ success: false, error: auth.error || 'Forbidden: Administrator privileges required.', code: 'FORBIDDEN' });
         }
 
         const clientToUse = auth.client || getSupabaseAdmin();
         if (!clientToUse) {
+          console.error('[Upload Request Info]', {
+            endpoint: '/api/upload',
+            method: req.method,
+            requestPath: req.originalUrl || req.path,
+            hasAuthHeader,
+            tokenVerificationSucceeded: true,
+            hasServiceRoleKey: false,
+            status: 500,
+            error: 'SUPABASE_SERVICE_ROLE_KEY is missing.',
+          });
           return res.status(500).json({
             success: false,
-            error: 'SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+            error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is missing. Please configure SUPABASE_SERVICE_ROLE_KEY in your server environment variables.',
+            code: 'MISSING_SERVICE_ROLE_KEY',
           });
         }
 
         const bucket = safeBucket;
         const allowedBuckets = ['portfolio-media', 'media', 'profile', 'projects', 'certificates', 'resume', 'resumes', 'avatars'];
         if (!allowedBuckets.includes(bucket)) {
-          return res.status(400).json({ success: false, error: `Invalid storage bucket "${bucket}". Allowed buckets: ${allowedBuckets.join(', ')}` });
+          return res.status(400).json({
+            success: false,
+            error: `Invalid storage bucket "${bucket}". Allowed buckets: ${allowedBuckets.join(', ')}`,
+            code: 'INVALID_BUCKET',
+          });
         }
 
         const filePath = `${Date.now()}_${safeFilename}`;
@@ -476,7 +584,17 @@ export function createApiApp(): express.Express {
 
         if (uploadErr) {
           console.error('[Storage Upload Error]', {
-            message: uploadErr.message,
+            endpoint: '/api/upload',
+            method: req.method,
+            requestPath: req.originalUrl || req.path,
+            status: 400,
+            hasAuthHeader,
+            tokenVerificationSucceeded: true,
+            hasServiceRoleKey,
+            operation: `storage.upload to ${bucket}`,
+            errorCode: (uploadErr as any).statusCode || (uploadErr as any).code,
+            errorMessage: uploadErr.message,
+            errorDetails: (uploadErr as any).error || uploadErr.message,
             bucket,
             filePath,
           });
@@ -519,27 +637,37 @@ export function createApiApp(): express.Express {
 
         if (!publicUrl || publicUrl === '[object Object]' || !publicUrl.startsWith('http')) {
           console.error('[Upload Request Info]', {
+            endpoint: '/api/upload',
             method: req.method,
-            path: req.path || req.originalUrl,
-            authenticated: true,
+            requestPath: req.originalUrl || req.path,
+            hasAuthHeader,
+            tokenVerificationSucceeded: true,
+            hasServiceRoleKey,
             bucket,
             filename: safeFilename,
             uploadSuccess: true,
             publicUrlGenerated: false,
             status: 500,
           });
-          return res.status(500).json({ success: false, error: 'Failed to generate public URL for uploaded file.' });
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to generate public URL for uploaded file.',
+            code: 'PUBLIC_URL_GENERATION_FAILED',
+          });
         }
 
         console.log('[Upload Request Info]', {
+          endpoint: '/api/upload',
           method: req.method,
-          path: req.path || req.originalUrl,
-          authenticated: true,
+          requestPath: req.originalUrl || req.path,
+          status: 200,
+          hasAuthHeader,
+          tokenVerificationSucceeded: true,
+          hasServiceRoleKey,
           bucket,
           filename: safeFilename,
           uploadSuccess: true,
-          status: 200,
-          responseShape: '{ success: true, url: string, publicUrl: string, path: string }',
+          urlGenerated: true,
         });
 
         return res.status(200).json({
@@ -554,9 +682,15 @@ export function createApiApp(): express.Express {
         });
       } catch (err: any) {
         console.error('[Upload Endpoint Exception]', {
-          message: err?.message,
-          code: err?.code,
-          details: err?.details,
+          endpoint: '/api/upload',
+          method: req.method,
+          requestPath: req.originalUrl || req.path,
+          status: 500,
+          hasAuthHeader,
+          hasServiceRoleKey,
+          errorMessage: err?.message,
+          errorCode: err?.code,
+          errorDetails: err?.details,
         });
         return res.status(500).json({
           success: false,

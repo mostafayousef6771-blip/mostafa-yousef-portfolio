@@ -13,19 +13,41 @@ export const config = {
 
 export default function handler(req: any, res: any) {
   try {
-    // 1. Get raw request URL
+    let cleanPath = '';
+
+    // 1. Check x-now-route-matches from Vercel regex rewrite capture groups (e.g. 1=admin%2Fsave)
+    const routeMatches = req.headers['x-now-route-matches'] || req.headers['x-vercel-route-matches'];
+    if (routeMatches && typeof routeMatches === 'string') {
+      try {
+        const params = new URLSearchParams(routeMatches);
+        const subPath = params.get('1') || params.get('path') || params.get('slug');
+        if (subPath) {
+          cleanPath = '/api/' + subPath.replace(/^\//, '');
+        }
+      } catch {}
+    }
+
+    // 2. Check forwarded URI headers if clean and not containing regex patterns
+    if (!cleanPath) {
+      const forwardedUri =
+        (req.headers['x-forwarded-uri'] as string) ||
+        (req.headers['x-original-uri'] as string) ||
+        (req.headers['x-original-url'] as string) ||
+        (req.headers['x-forwarded-path'] as string) ||
+        '';
+      if (forwardedUri && typeof forwardedUri === 'string' && forwardedUri.startsWith('/api') && !forwardedUri.includes('(')) {
+        cleanPath = forwardedUri.split('?')[0];
+      }
+    }
+
+    // 3. Fallback to raw request URL
     const originalUrl = req.url || '';
     const queryIndex = originalUrl.indexOf('?');
     const queryString = queryIndex !== -1 ? originalUrl.substring(queryIndex) : '';
     const pathname = queryIndex !== -1 ? originalUrl.substring(0, queryIndex) : originalUrl;
 
-    // 2. Safe normalization: strip /api/index if present
-    let cleanPath = pathname.replace(/^\/api\/index(\.ts|\.js)?/, '/api');
-
-    // 3. Check x-forwarded-uri or x-original-uri only if clean
-    const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-original-uri']) as string | undefined;
-    if (forwardedUri && typeof forwardedUri === 'string' && forwardedUri.startsWith('/api') && !forwardedUri.includes('(')) {
-      cleanPath = forwardedUri.split('?')[0];
+    if (!cleanPath) {
+      cleanPath = pathname.replace(/^\/api\/index(\.ts|\.js)?/, '/api');
     }
 
     // 4. Ensure path starts with /api for API endpoints
@@ -38,7 +60,11 @@ export default function handler(req: any, res: any) {
     // Execute Express app
     return app(req, res);
   } catch (err: any) {
-    console.error('[Vercel Serverless Handler Exception]', err);
+    console.error('[Vercel Serverless Handler Exception]', {
+      message: err?.message,
+      code: err?.code,
+      details: err?.details,
+    });
     if (!res.headersSent) {
       res.setHeader('Content-Type', 'application/json');
       return res.status(500).json({
